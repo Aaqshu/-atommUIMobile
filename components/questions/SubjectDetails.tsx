@@ -6,6 +6,9 @@ import { ArrowLeft, BookOpen, Eye, CircleDot, CircleCheck as CheckCircle2, Bookm
 import QuestionDetail from './QuestionDetail';
 import { QuestionStateService, QuestionStatus } from '@/services/questionStateService';
 import axios from 'axios';
+import { useAuth } from '@/hooks/useAuth';
+import MathRenderer from '@/components/common/MathRenderer';
+import RichContentRenderer from '@/components/common/RichContentRenderer';
 
 type Chapter = {
   ID: number;
@@ -38,7 +41,7 @@ type Question = {
   option_c?: string;
   option_d?: string;
   options?: string[];
-  correct_answer?: string;
+  correct_answer: string;
   correct_option?: string;
   explanation?: string;
   solution?: string;
@@ -47,8 +50,29 @@ type Question = {
   status?: QuestionStatus;
 };
 
+// Exam year ranges for filter (move to top-level scope)
+const yearRanges = [
+  'All Years',
+  '2000 & Before',
+  '2001 - 2010',
+  '2011 - 2015',
+  '2016 - 2020',
+  '2021 & Onwards',
+];
+const getYearRange = (year: string | number) => {
+  const y = typeof year === 'string' ? parseInt(year, 10) : year;
+  if (!y || isNaN(y)) return 'All Years';
+  if (y <= 2000) return '2000 & Before';
+  if (y >= 2001 && y <= 2010) return '2001 - 2010';
+  if (y >= 2011 && y <= 2015) return '2011 - 2015';
+  if (y >= 2016 && y <= 2020) return '2016 - 2020';
+  if (y >= 2021) return '2021 & Onwards';
+  return 'All Years';
+};
+
 export default function SubjectDetails({ subject, subjectId, onBack, type, token }: SubjectDetailsProps) {
   const { colors } = useTheme();
+  const { user } = useAuth();
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -60,6 +84,18 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [questionStates, setQuestionStates] = useState<{ [questionId: string]: QuestionStatus }>({});
   const [bookmarkedQuestions, setBookmarkedQuestions] = useState<Set<string>>(new Set());
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'attempted' | 'seen' | 'new' | 'bookmarked'>('all');
+  const [seenIds, setSeenIds] = useState<number[]>([]);
+  const [attemptedIds, setAttemptedIds] = useState<number[]>([]);
+  const [bookmarkedIds, setBookmarkedIds] = useState<number[]>([]);
+  // State for local exam type/year filters (for previous-year section)
+  const [localExamTypes, setLocalExamTypes] = useState<string[]>([]);
+  const [localExamYears, setLocalExamYears] = useState<string[]>([]);
+  const [selectedLocalExamType, setSelectedLocalExamType] = useState<string>('All');
+  const [selectedLocalExamYear, setSelectedLocalExamYear] = useState<string>('All Years');
+  // Subtopic filter state for PYQ
+  const [subtopics, setSubtopics] = useState<{ number: number; name: string }[]>([]);
+  const [selectedSubtopic, setSelectedSubtopic] = useState<'all' | number>('all');
 
   const stats = {
     all: questions.length,
@@ -191,8 +227,12 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
         yearRange: selectedYearRange !== 'All Years' ? selectedYearRange : undefined,
       };
 
+      const endpoint = type === 'most-wanted'
+        ? 'https://atomm-57b7d9183bae.herokuapp.com/api/admin/data/getMWQuestions'
+        : 'https://atomm-57b7d9183bae.herokuapp.com/api/admin/data/getPYQsQuestions';
+
       const response = await axios.post(
-        'https://atomm-57b7d9183bae.herokuapp.com/api/admin/data/getPYQsQuestions',
+        endpoint,
         requestBody,
         {
           headers: {
@@ -217,7 +257,7 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
           options: options,
           // Ensure we have the question text
           question: q.question || q.question_text || '',
-          // Normalize correct answer field
+          // Normalize correct answer field (always string)
           correct_answer: q.correct_answer || q.correct_option || '',
           // Normalize solution field
           solution: q.solution || q.explanation || ''
@@ -225,6 +265,58 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
       });
 
       setQuestions(questionsWithStatus);
+
+      // Extract exam types and years for previous-year section
+      if (type === 'previous-year') {
+        const examTypeSet = new Set<string>();
+        const examYearSet = new Set<string>();
+        questionsWithStatus.forEach((q: any) => {
+          // exam_type field (may be comma or newline separated)
+          if (q.exam_type) {
+            (q.exam_type.split(/[\n,]+/) as string[]).forEach((raw: string) => {
+              const trimmed = raw.trim();
+              if (trimmed) {
+                // Try to extract year from string
+                const yearMatch = trimmed.match(/(19|20)\d{2}/);
+                if (yearMatch) {
+                  examYearSet.add(getYearRange(yearMatch[0]));
+                }
+                // Extract type (before year or after dash)
+                const typeMatch = trimmed.match(/^[^\d]+/);
+                if (typeMatch) {
+                  examTypeSet.add(typeMatch[0].replace(/[-:]$/, '').trim());
+                } else {
+                  // fallback: add the whole string if no year
+                  examTypeSet.add(trimmed);
+                }
+              }
+            });
+          }
+          // neet, aiims, aipmt keys (may be stringified arrays)
+          ['neet', 'aiims', 'aipmt'].forEach(key => {
+            if (q[key]) {
+              let val = q[key];
+              try {
+                // Try to parse as array
+                const arr = JSON.parse(val);
+                if (Array.isArray(arr)) {
+                  arr.forEach((year: string) => examYearSet.add(getYearRange(year)));
+                  examTypeSet.add(key.toUpperCase());
+                }
+              } catch {
+                // Not an array, treat as single year
+                if (val && val !== '') {
+                  examYearSet.add(getYearRange(val.replace(/['\[\]]/g, '')));
+                  examTypeSet.add(key.toUpperCase());
+                }
+              }
+            }
+          });
+        });
+        // Only allow these four labels for exam type
+        setLocalExamTypes(['All', 'NEET', 'AIPMT', 'AIIMS']);
+        setLocalExamYears(yearRanges);
+      }
     } catch (err) {
       console.error('Error fetching questions:', err);
       setError('Failed to load questions');
@@ -242,45 +334,129 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
   const handleChapterSelect = (chapter: Chapter) => {
     setSelectedChapter(chapter);
     fetchQuestions(chapter);
+    // Parse subtopics for PYQ
+    if (type === 'previous-year' && chapter.subtopic_name) {
+      try {
+        // Clean and parse the subtopic_name string
+        const clean = chapter.subtopic_name.replace(/'/g, '"');
+        const arr = JSON.parse(clean);
+        const parsed = arr.map((item: string) => {
+          const match = item.match(/^(\d+)\.(.*)$/);
+          if (match) {
+            return { number: parseInt(match[1], 10), name: match[2].trim() };
+          }
+          return null;
+        }).filter(Boolean);
+        setSubtopics(parsed);
+      } catch {
+        setSubtopics([]);
+      }
+      setSelectedSubtopic('all');
+    } else {
+      setSubtopics([]);
+      setSelectedSubtopic('all');
+    }
+  };
+
+  // Helper to send progress data API call
+  const sendProgress = async (action: 'seen' | 'attempted' | 'bookmarked', chapterId: string) => {
+    if (!user?.userId) return;
+
+    const endpoint = type === 'most-wanted'
+      ? 'https://atomm-57b7d9183bae.herokuapp.com/api/users/progress_mw'
+      : 'https://atomm-57b7d9183bae.herokuapp.com/api/users/progress_pyq';
+
+    // Ensure seen does not include any attempted
+    const filteredSeen = seenIds.filter(id => !attemptedIds.includes(id));
+    
+    const payload: any = {
+      studentId: user.userId,
+      subjectId: subjectId,
+    };
+    payload[chapterId] = [
+      {
+        seen: filteredSeen,
+        attempted: attemptedIds,
+        bookmarked: bookmarkedIds,
+      },
+    ];
+    try {
+      await axios.post(endpoint, payload);
+    } catch (err) {
+      console.error(`Failed to send ${type} progress:`, err);
+    }
   };
 
   const handleQuestionSelect = async (question: Question, index: number) => {
     setSelectedQuestion(question);
     setCurrentQuestionIndex(index);
-    
     // Mark question as seen when user opens it
     await updateQuestionState(question.question_id, 'seen');
+    if (selectedChapter) {
+      const match = question.question_id.match(/(\d+)(?!.*\d)/);
+      const idInt = match ? parseInt(match[1], 10) : null;
+      if (idInt && !seenIds.includes(idInt)) {
+        setSeenIds(prev => [...prev, idInt]);
+      }
+    }
   };
 
   const handleNextQuestion = () => {
     if (currentQuestionIndex < questions.length - 1) {
       const nextIndex = currentQuestionIndex + 1;
+      const nextQuestion = questions[nextIndex];
       setCurrentQuestionIndex(nextIndex);
-      setSelectedQuestion(questions[nextIndex]);
+      setSelectedQuestion(nextQuestion);
       
       // Mark next question as seen
-      updateQuestionState(questions[nextIndex].question_id, 'seen');
+      updateQuestionState(nextQuestion.question_id, 'seen');
+      if (selectedChapter) {
+        const match = nextQuestion.question_id.match(/(\d+)(?!.*\d)/);
+        const idInt = match ? parseInt(match[1], 10) : null;
+        if (idInt && !seenIds.includes(idInt) && !attemptedIds.includes(idInt)) {
+          setSeenIds(prev => [...prev, idInt]);
+        }
+      }
     }
   };
 
   const handlePreviousQuestion = () => {
     if (currentQuestionIndex > 0) {
       const prevIndex = currentQuestionIndex - 1;
+      const prevQuestion = questions[prevIndex];
       setCurrentQuestionIndex(prevIndex);
-      setSelectedQuestion(questions[prevIndex]);
+      setSelectedQuestion(prevQuestion);
       
       // Mark previous question as seen
-      updateQuestionState(questions[prevIndex].question_id, 'seen');
+      updateQuestionState(prevQuestion.question_id, 'seen');
+      if (selectedChapter) {
+        const match = prevQuestion.question_id.match(/(\d+)(?!.*\d)/);
+        const idInt = match ? parseInt(match[1], 10) : null;
+        if (idInt && !seenIds.includes(idInt) && !attemptedIds.includes(idInt)) {
+          setSeenIds(prev => [...prev, idInt]);
+        }
+      }
     }
   };
 
   const handleQuestionAnswered = async (questionId: string, selectedOption: string, isCorrect: boolean) => {
     await updateQuestionState(questionId, 'attempted', selectedOption, isCorrect);
+    if (selectedChapter) {
+      const match = questionId.match(/(\d+)(?!.*\d)/);
+      const idInt = match ? parseInt(match[1], 10) : null;
+      if (idInt && !attemptedIds.includes(idInt)) {
+        setAttemptedIds(prev => {
+          const updated = [...prev, idInt];
+          // Remove from seenIds as well
+          setSeenIds(seenPrev => seenPrev.filter(id => id !== idInt));
+          return updated;
+        });
+      }
+    }
   };
 
   const handleBookmarkToggle = async (questionId: string) => {
     if (!selectedChapter) return;
-    
     try {
       const newBookmarkStatus = await QuestionStateService.toggleBookmark(
         type,
@@ -288,12 +464,19 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
         selectedChapter.chapter_id,
         questionId
       );
-      
+      const match = questionId.match(/(\d+)(?!.*\d)/);
+      const idInt = match ? parseInt(match[1], 10) : null;
       const newBookmarked = new Set(bookmarkedQuestions);
       if (newBookmarkStatus) {
         newBookmarked.add(questionId);
+        if (idInt && !bookmarkedIds.includes(idInt)) {
+          setBookmarkedIds(prev => [...prev, idInt]);
+        }
       } else {
         newBookmarked.delete(questionId);
+        if (idInt && bookmarkedIds.includes(idInt)) {
+          setBookmarkedIds(prev => prev.filter(id => id !== idInt));
+        }
       }
       setBookmarkedQuestions(newBookmarked);
     } catch (error) {
@@ -364,53 +547,135 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
 
   const renderFilters = () => (
     <View style={styles.filtersContainer}>
-      <View style={styles.filterSection}>
-        <Text style={[styles.filterLabel, { color: colors.text }]}>Exam Type:</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {(['All', 'NEET', 'AIPMT', 'AIIMS'] as ExamType[]).map((type) => (
-            <TouchableOpacity
-              key={type}
-              style={[
-                styles.filterChip,
-                selectedExamType === type && { backgroundColor: colors.primary },
-              ]}
-              onPress={() => setSelectedExamType(type)}
-            >
-              <Text style={[
-                styles.filterChipText,
-                { color: selectedExamType === type ? '#fff' : colors.text }
-              ]}>
-                {type}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
+      {type === 'previous-year' ? (
+        <>
+          <View style={styles.filterSection}>
+            <Text style={[styles.filterLabel, { color: colors.text }]}>Exam Type:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {localExamTypes.map((type: string) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.filterChip,
+                    selectedLocalExamType === type && { backgroundColor: colors.primary },
+                  ]}
+                  onPress={() => setSelectedLocalExamType(type)}
+                >
+                  <Text style={[
+                    styles.filterChipText,
+                    { color: selectedLocalExamType === type ? '#fff' : colors.text }
+                  ]}>
+                    {type}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+          <View style={styles.filterSection}>
+            <Text style={[styles.filterLabel, { color: colors.text }]}>Exam Year:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {yearRanges.map((year: string) => (
+                <TouchableOpacity
+                  key={year}
+                  style={[
+                    styles.filterChip,
+                    selectedLocalExamYear === year && { backgroundColor: colors.primary },
+                  ]}
+                  onPress={() => setSelectedLocalExamYear(year)}
+                >
+                  <Text style={[
+                    styles.filterChipText,
+                    { color: selectedLocalExamYear === year ? '#fff' : colors.text }
+                  ]}>
+                    {year}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </>
+      ) : (
+        <>
+          <View style={styles.filterSection}>
+            <Text style={[styles.filterLabel, { color: colors.text }]}>Exam Type:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {(['All', 'NEET', 'AIPMT', 'AIIMS'] as ExamType[]).map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.filterChip,
+                    selectedExamType === type && { backgroundColor: colors.primary },
+                  ]}
+                  onPress={() => setSelectedExamType(type)}
+                >
+                  <Text style={[
+                    styles.filterChipText,
+                    { color: selectedExamType === type ? '#fff' : colors.text }
+                  ]}>
+                    {type}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+          <View style={styles.filterSection}>
+            <Text style={[styles.filterLabel, { color: colors.text }]}>Exam Year:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {([
+                'All Years',
+                '2000 & Before',
+                '2001 - 2010',
+                '2011 - 2015',
+                '2016 - 2020',
+                '2021 & Onwards'
+              ] as YearRange[]).map((year) => (
+                <TouchableOpacity
+                  key={year}
+                  style={[
+                    styles.filterChip,
+                    selectedYearRange === year && { backgroundColor: colors.primary },
+                  ]}
+                  onPress={() => setSelectedYearRange(year)}
+                >
+                  <Text style={[
+                    styles.filterChipText,
+                    { color: selectedYearRange === year ? '#fff' : colors.text }
+                  ]}>
+                    {year}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </>
+      )}
+    </View>
+  );
 
+  const renderStatusFilters = () => (
+    <View style={styles.filtersContainer}>
       <View style={styles.filterSection}>
-        <Text style={[styles.filterLabel, { color: colors.text }]}>Exam Year:</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           {([
-            'All Years',
-            '2000 & Before',
-            '2001 - 2010',
-            '2011 - 2015',
-            '2016 - 2020',
-            '2021 & Onwards'
-          ] as YearRange[]).map((year) => (
+            { label: 'All', key: 'all' as 'all' },
+            { label: 'Attempted', key: 'attempted' as 'attempted' },
+            { label: 'Seen', key: 'seen' as 'seen' },
+            { label: 'New', key: 'new' as 'new' },
+            { label: 'Bookmarked', key: 'bookmarked' as 'bookmarked' }
+          ]).map(filter => (
             <TouchableOpacity
-              key={year}
+              key={filter.key}
               style={[
                 styles.filterChip,
-                selectedYearRange === year && { backgroundColor: colors.primary },
+                selectedStatusFilter === filter.key && { backgroundColor: colors.primary },
               ]}
-              onPress={() => setSelectedYearRange(year)}
+              onPress={() => setSelectedStatusFilter(filter.key)}
             >
               <Text style={[
                 styles.filterChipText,
-                { color: selectedYearRange === year ? '#fff' : colors.text }
+                { color: selectedStatusFilter === filter.key ? '#fff' : colors.text }
               ]}>
-                {year}
+                {filter.label}
               </Text>
             </TouchableOpacity>
           ))}
@@ -448,57 +713,168 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
     </View>
   );
 
+  // Local filter for previous-year section
+  const locallyFilteredQuestions = type === 'previous-year' ? questions.filter((q: any) => {
+    let matchesType = true;
+    let matchesYear = true;
+    if (selectedLocalExamType && selectedLocalExamType !== 'All') {
+      // Check exam_type and keys
+      matchesType = false;
+      if (q.exam_type && q.exam_type.toLowerCase().includes(selectedLocalExamType.toLowerCase())) {
+        matchesType = true;
+      }
+      ['neet', 'aiims', 'aipmt'].forEach(key => {
+        if (q[key] && selectedLocalExamType.toLowerCase() === key) {
+          matchesType = true;
+        }
+      });
+    }
+    if (selectedLocalExamYear && selectedLocalExamYear !== 'All Years') {
+      matchesYear = false;
+      // Check in exam_type string
+      let foundYear = false;
+      if (q.exam_type) {
+        const yearMatches = q.exam_type.match(/(19|20)\d{2}/g);
+        if (yearMatches && yearMatches.some((y: string) => getYearRange(y) === selectedLocalExamYear)) {
+          foundYear = true;
+        }
+      }
+      // Check in neet, aiims, aipmt keys
+      ['neet', 'aiims', 'aipmt'].forEach(key => {
+        if (q[key]) {
+          try {
+            const arr = JSON.parse(q[key]);
+            if (Array.isArray(arr) && arr.some((y: string) => getYearRange(y) === selectedLocalExamYear)) {
+              foundYear = true;
+            }
+          } catch {
+            if (q[key] && getYearRange(q[key].replace(/['\[\]]/g, '')) === selectedLocalExamYear) {
+              foundYear = true;
+            }
+          }
+        }
+      });
+      matchesYear = foundYear;
+    }
+    // Subtopic filter
+    if (selectedSubtopic !== 'all') {
+      if (q.sub_topic_no !== selectedSubtopic) return false;
+    }
+
+    // Status filter for PYQ
+    if (selectedStatusFilter !== 'all') {
+      const status = questionStates[q.question_id] || 'new';
+      const isBookmarked = bookmarkedQuestions.has(q.question_id);
+      
+      switch (selectedStatusFilter) {
+        case 'attempted':
+          if (status !== 'attempted') return false;
+          break;
+        case 'seen':
+          if (status !== 'seen') return false;
+          break;
+        case 'new':
+          if (status !== 'new' && status) return false;
+          break;
+        case 'bookmarked':
+          if (!isBookmarked) return false;
+          break;
+        default:
+          break;
+      }
+    }
+
+    return matchesType && matchesYear;
+  }) : questions.filter((q: any) => {
+    // Status filter for most-wanted section
+    if (selectedStatusFilter === 'all') return true;
+    
+    const status = questionStates[q.question_id] || 'new';
+    const isBookmarked = bookmarkedQuestions.has(q.question_id);
+    
+    switch (selectedStatusFilter) {
+      case 'attempted':
+        return status === 'attempted';
+      case 'seen':
+        return status === 'seen';
+      case 'new':
+        return status === 'new' || !status;
+      case 'bookmarked':
+        return isBookmarked;
+      default:
+        return true;
+    }
+  });
+
   const renderQuestions = () => (
     <View style={styles.questionsContainer}>
-      {questions.map((question, index) => (
+      {locallyFilteredQuestions.map((question, index) => (
         <Animated.View
           key={question.question_id}
           entering={FadeIn.duration(300).delay(index * 100)}
-          style={[styles.questionCard, { backgroundColor: colors.cardBackground }]}
+          style={[
+            styles.questionCard,
+            {
+              backgroundColor: '#fff',
+              borderColor: '#e5e7eb',
+              borderWidth: 1,
+              shadowColor: '#000',
+              shadowOpacity: 0.04,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 2 },
+              elevation: 1,
+            },
+          ]}
         >
           <TouchableOpacity
-            style={styles.questionContent}
+            style={[styles.questionContent, { padding: 20 }]}
             onPress={() => handleQuestionSelect(question, index)}
             activeOpacity={0.7}
           >
-            <View style={styles.questionHeader}>
-              <View style={styles.questionNumberContainer}>
-                <Text style={[styles.questionNumber, { color: colors.text }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ fontSize: 20, fontWeight: '700', color: '#1e293b', marginRight: 10 }}>
                   {String(index + 1).padStart(2, '0')}.
                 </Text>
-                <View style={styles.questionStatus}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'transparent' }}>
                   {getStatusIcon(question.question_id)}
-                  <Text style={[styles.statusText, { color: getStatusColor(question.question_id) }]}>
+                  <Text style={{ fontWeight: '600', color: '#22c55e', marginLeft: 4, fontSize: 16 }}>
                     {getStatusText(question.question_id)}
                   </Text>
                 </View>
               </View>
               <TouchableOpacity onPress={() => handleBookmarkToggle(question.question_id)}>
-                <Bookmark 
-                  size={20} 
-                  color={bookmarkedQuestions.has(question.question_id) ? colors.primary : colors.textSecondary}
-                  fill={bookmarkedQuestions.has(question.question_id) ? colors.primary : 'transparent'}
+                <Bookmark
+                  size={22}
+                  color={bookmarkedQuestions.has(question.question_id) ? '#2563eb' : '#94a3b8'}
+                  fill={bookmarkedQuestions.has(question.question_id) ? '#2563eb' : 'transparent'}
                 />
               </TouchableOpacity>
             </View>
-            
-            <Text 
-              style={[styles.questionText, { color: colors.text }]}
-              numberOfLines={3}
-              ellipsizeMode="tail"
-            >
-              {question.question}
-            </Text>
 
-            <View style={styles.questionFooter}>
-              <View style={[styles.examTag, { backgroundColor: colors.primary + '20' }]}>
-                <Text style={[styles.examTagText, { color: colors.primary }]}>
-                  {question.exam_type}
+            <View style={{ marginBottom: 12 }}>
+              <RichContentRenderer
+                content={question.question || ''}
+                subjectId={subjectId}
+                chapterId={selectedChapter?.chapter_id || ''}
+                color={colors.text}
+              />
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{
+                backgroundColor: '#e8edfd',
+                borderRadius: 20,
+                paddingHorizontal: 20,
+                paddingVertical: 4,
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: 32,
+              }}>
+                <Text style={{ color: '#2563eb', fontWeight: '700', fontSize: 16, textAlign: 'center' }}>
+                  {question.exam_type}{question.exam_year ? `-${question.exam_year}` : ''}
                 </Text>
               </View>
-              <Text style={[styles.yearText, { color: colors.textSecondary }]}>
-                {question.exam_year}
-              </Text>
             </View>
           </TouchableOpacity>
         </Animated.View>
@@ -532,6 +908,136 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
       ))}
     </View>
   );
+
+  useEffect(() => {
+    if (selectedChapter && seenIds.length > 0) {
+      sendProgress('seen', selectedChapter.chapter_id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seenIds]);
+
+  useEffect(() => {
+    if (selectedChapter && attemptedIds.length > 0) {
+      sendProgress('attempted', selectedChapter.chapter_id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attemptedIds]);
+
+  useEffect(() => {
+    if (selectedChapter) {
+      sendProgress('bookmarked', selectedChapter.chapter_id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookmarkedIds]);
+
+  useEffect(() => {
+    // For most-wanted, fetch last saved question states from API when chapter changes
+    const fetchProgressData = async () => {
+      if (user?.userId && selectedChapter) {
+        const endpoint = type === 'most-wanted'
+          ? 'https://atomm-57b7d9183bae.herokuapp.com/api/users/get_mw_data'
+          : 'https://atomm-57b7d9183bae.herokuapp.com/api/users/get_pyq_data';
+
+        try {
+          const res = await axios.post(endpoint, {
+            studentId: user.userId,
+            subjectId: subjectId,
+          });
+
+          const data = res.data?.data || {};
+          const chapterKey = selectedChapter.chapter_id;
+          const chapterState = (data[chapterKey] && Array.isArray(data[chapterKey]) && data[chapterKey][0]) ? data[chapterKey][0] : {};
+
+          const seen = Array.isArray(chapterState.seen) ? chapterState.seen : [];
+          const attempted = Array.isArray(chapterState.attempted) ? chapterState.attempted : [];
+          const bookmarked = Array.isArray(chapterState.bookmarked) ? chapterState.bookmarked : [];
+
+          setSeenIds(seen);
+          setAttemptedIds(attempted);
+          setBookmarkedIds(bookmarked);
+
+          const newStateMap: { [questionId: string]: QuestionStatus } = {};
+          const newBookmarkedSet = new Set<string>();
+
+          const findQuestionIdByInt = (idInt: number) => {
+            const q = questions.find(q => {
+              const match = q.question_id.match(/(\d+)$/);
+              return match ? parseInt(match[1], 10) === idInt : false;
+            });
+            return q?.question_id;
+          };
+
+          seen.forEach((id: number) => {
+            const qId = findQuestionIdByInt(id);
+            if (qId) newStateMap[qId] = 'seen';
+          });
+
+          attempted.forEach((id: number) => {
+            const qId = findQuestionIdByInt(id);
+            if (qId) newStateMap[qId] = 'attempted';
+          });
+
+          bookmarked.forEach((id: number) => {
+            const qId = findQuestionIdByInt(id);
+            if (qId) newBookmarkedSet.add(qId);
+          });
+          
+          setQuestionStates(newStateMap);
+          setBookmarkedQuestions(newBookmarkedSet);
+
+        } catch (err) {
+          console.error(`Failed to fetch ${type} data:`, err);
+          setSeenIds([]);
+          setAttemptedIds([]);
+          setBookmarkedIds([]);
+          setQuestionStates({});
+          setBookmarkedQuestions(new Set());
+        }
+      }
+    };
+
+    if (questions.length > 0 || type) {
+      fetchProgressData();
+    }
+  }, [type, user?.userId, subjectId, selectedChapter, questions]);
+
+  // Subtopic filter UI for PYQ
+  const renderSubtopicFilter = () => {
+    if (type !== 'previous-year' || subtopics.length === 0) return null;
+    if (Platform.OS === 'web') {
+      return (
+        <div style={{ marginBottom: 16 }}>
+          <select
+            value={selectedSubtopic}
+            onChange={e => setSelectedSubtopic(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            style={{ padding: 8, borderRadius: 8, borderColor: '#cbd5e1', minWidth: 200 }}
+          >
+            <option value="all">All Subtopics</option>
+            {subtopics.map(st => (
+              <option key={st.number} value={st.number}>{st.name}</option>
+            ))}
+          </select>
+        </div>
+      );
+    } else {
+      // Native: use Picker
+      const Picker = require('@react-native-picker/picker').Picker;
+      return (
+        <View style={{ marginBottom: 16 }}>
+          <Picker
+            selectedValue={selectedSubtopic}
+            onValueChange={(v: any) => setSelectedSubtopic(v)}
+            style={{ height: 44, borderRadius: 8 }}
+          >
+            <Picker.Item label="All Subtopics" value="all" />
+            {subtopics.map(st => (
+              <Picker.Item key={st.number} label={st.name} value={st.number} />
+            ))}
+          </Picker>
+        </View>
+      );
+    }
+  };
 
   if (selectedQuestion) {
     return (
@@ -589,7 +1095,14 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
         ) : selectedChapter ? (
           <>
             {renderStats()}
-            {renderFilters()}
+            {type === 'previous-year' && (
+              <>
+                {renderSubtopicFilter()}
+                {renderFilters()}
+              </>
+            )}
+            {/* Show status filters for both MW and PYQ */}
+            {renderStatusFilters()}
             {renderQuestions()}
           </>
         ) : (

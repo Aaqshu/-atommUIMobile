@@ -32,7 +32,7 @@ export default function LoginScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Animated.View entering={FadeIn.duration(800)} style={styles.headerContainer}>
         <Image
-          source={{ uri: 'https://images.pexels.com/photos/3769138/pexels-photo-3769138.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2' }}
+          source={{ uri: 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?q=80&w=2073&auto=format&fit=crop' }}
           style={styles.headerImage}
         />
         <View style={[styles.overlay, { backgroundColor: colors.primary + '80' }]} />

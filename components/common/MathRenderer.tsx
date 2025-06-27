@@ -7,25 +7,40 @@ type MathRendererProps = {
   color?: string;
 };
 
+function hasMathDelimiters(str: string) {
+  return /\$[^$]+\$|\$\$[\s\S]+\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)/.test(str);
+}
+
 export default function MathRenderer({ content, color = '#000' }: MathRendererProps) {
-  // For web platform, render as regular text with basic formatting
+  let mathContent = content || '';
+  if (!hasMathDelimiters(mathContent)) {
+    mathContent = `\\[${mathContent}\\]`;
+  }
+
   if (Platform.OS === 'web') {
     return (
-      <Text style={[styles.mathText, { color }]}>
-        {content}
-      </Text>
+      <Text style={[styles.mathText, { color }]}>{content}</Text>
     );
   }
 
-  // For mobile platforms, use WebView with MathJax
   const htmlContent = `
     <!DOCTYPE html>
     <html>
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
-        <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        <script type="text/x-mathjax-config">
+          MathJax.Hub.Config({
+            tex2jax: {
+              inlineMath: [['$','$'], ['\\(','\\)']],
+              displayMath: [['$$','$$'], ['\\[','\\]']],
+              processEscapes: true
+            },
+            showMathMenu: false,
+            messageStyle: 'none'
+          });
+        </script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.9/MathJax.js?config=TeX-AMS_HTML"></script>
         <style>
           body {
             margin: 0;
@@ -41,18 +56,30 @@ export default function MathRenderer({ content, color = '#000' }: MathRendererPr
         </style>
       </head>
       <body>
-        <div class="math-content">${content}</div>
+        <div class="math-content">${mathContent}</div>
+        <script type="text/javascript">
+          if (window.MathJax) {
+            MathJax.Hub.Queue(['Typeset', MathJax.Hub]);
+          }
+        </script>
       </body>
     </html>
   `;
 
   return (
     <WebView
+      key={mathContent}
       source={{ html: htmlContent }}
       style={styles.webView}
       scrollEnabled={false}
       showsVerticalScrollIndicator={false}
       showsHorizontalScrollIndicator={false}
+      originWhitelist={['*']}
+      javaScriptEnabled={true}
+      domStorageEnabled={true}
+      automaticallyAdjustContentInsets={false}
+      useWebKit={true}
+      startInLoadingState={true}
       onMessage={() => {}}
     />
   );
@@ -65,8 +92,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Regular',
   },
   webView: {
-    flex: 1,
-    backgroundColor: 'transparent',
     minHeight: 40,
+    flexShrink: 1,
+    backgroundColor: 'transparent',
   },
 });

@@ -1,11 +1,15 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { Chrome as Home, User, BookOpen, FileText, Plus } from 'lucide-react-native';
+import { Home, User, FileText, Plus } from 'lucide-react-native';
 import { useTheme } from '@/hooks/useTheme';
+import { useAuth } from '@/hooks/useAuth';
 
 export default function TabLayout() {
   const { colors } = useTheme();
-  
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading || !isAuthenticated) return null;
+
   return (
     <Tabs
       screenOptions={{
@@ -15,9 +19,7 @@ export default function TabLayout() {
           backgroundColor: colors.cardBackground,
           borderTopWidth: 1,
           borderTopColor: colors.border,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
+          height: 50,
         },
         headerStyle: {
           backgroundColor: colors.background,
@@ -33,7 +35,7 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen
-        name="index"
+        name="home"
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => <Home size={size} color={color} />,
@@ -54,6 +56,12 @@ export default function TabLayout() {
           title: 'Questions',
           tabBarIcon: ({ color, size }) => <FileText size={size} color={color} />,
           headerTitle: 'Questions Bank',
+        }}
+      />
+      <Tabs.Screen
+        name="solution"
+        options={{
+          href: null,
         }}
       />
       <Tabs.Screen

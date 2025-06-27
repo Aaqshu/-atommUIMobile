@@ -38,7 +38,7 @@ export default function ProfileScreen() {
         </View>
       </View>
       
-      <View style={styles.section}>
+      {/* <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Account</Text>
         <View style={[styles.optionsContainer, { backgroundColor: colors.cardBackground }]}>
           <ProfileOption 
@@ -69,7 +69,7 @@ export default function ProfileScreen() {
             subtitle="App information and version"
           />
         </View>
-      </View>
+      </View> */}
       
       <TouchableOpacity 
         style={[styles.logoutButton, { backgroundColor: colors.danger }]}

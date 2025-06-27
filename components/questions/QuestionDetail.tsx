@@ -4,7 +4,11 @@ import { useTheme } from '@/hooks/useTheme';
 import { ArrowLeft, Bookmark, TriangleAlert as AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import Animated, { FadeIn, SlideInUp } from 'react-native-reanimated';
 import MathRenderer from '@/components/common/MathRenderer';
+import RichContentRenderer from '@/components/common/RichContentRenderer';
 import { QuestionStateService } from '@/services/questionStateService';
+import axios from 'axios';
+import { useAuth } from '@/hooks/useAuth';
+import ReportIssueModal from './ReportIssueModal';
 
 type Question = {
   question_id: string;
@@ -50,10 +54,12 @@ export default function QuestionDetail({
   chapterId
 }: QuestionDetailProps) {
   const { colors } = useTheme();
+  const { user } = useAuth();
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [showAnswer, setShowAnswer] = useState(false);
   const [isAnswered, setIsAnswered] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
+  const [isReportModalVisible, setReportModalVisible] = useState(false);
 
   const optionLabels = ['A', 'B', 'C', 'D'];
 
@@ -107,18 +113,24 @@ export default function QuestionDetail({
     }
   };
 
-  const handleCheckAnswer = () => {
+  const handleCheckAnswer = async () => {
     if (selectedOption) {
       setShowAnswer(true);
       setIsAnswered(true);
-      
       // Check if answer is correct
       const correctAnswer = question.correct_answer || question.correct_option;
       const isCorrect = selectedOption === correctAnswer;
-      
       // Call the callback to update question state
       if (onQuestionAnswered) {
         onQuestionAnswered(question.question_id, selectedOption, isCorrect);
+      }
+      // Call questions_attempted API
+      if (user?.userId) {
+        try {
+          await axios.post(`https://atomm-57b7d9183bae.herokuapp.com/api/users/questions_attempted/${user.userId}`, { today_attempt: 1 });
+        } catch (err) {
+          console.error('Failed to record question attempt:', err);
+        }
       }
     }
   };
@@ -210,7 +222,7 @@ export default function QuestionDetail({
   };
 
   const getCorrectOptionLabel = () => {
-    const correctAnswer = question.correct_answer || question.correct_option;
+    const correctAnswer = question.correct_answer || question.correct_option || '';
     const correctIndex = options.indexOf(correctAnswer);
     return correctIndex !== -1 ? optionLabels[correctIndex] : 'Unknown';
   };
@@ -223,6 +235,16 @@ export default function QuestionDetail({
   // Get solution text from either field
   const solutionText = question.solution || question.explanation || '';
 
+  const handleReportSubmit = (issues: string[], otherDetails: string) => {
+    console.log('Reporting issue for question:', question.question_id);
+    console.log('Issues:', issues);
+    if (otherDetails) {
+      console.log('Details:', otherDetails);
+    }
+    // TODO: Implement API call to submit the report
+    setReportModalVisible(false);
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
@@ -231,13 +253,18 @@ export default function QuestionDetail({
           <ArrowLeft size={24} color={colors.text} />
           <Text style={[styles.backText, { color: colors.text }]}>Back to Questions</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={handleBookmark} style={styles.bookmarkButton}>
-          <Bookmark 
-            size={24} 
-            color={isBookmarked ? colors.primary : colors.textSecondary}
-            fill={isBookmarked ? colors.primary : 'transparent'}
-          />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity onPress={() => setReportModalVisible(true)} style={styles.reportButton}>
+            <AlertTriangle size={24} color={colors.warning} />
+          </TouchableOpacity>
+          {/* <TouchableOpacity onPress={handleBookmark} style={styles.bookmarkButton}>
+            <Bookmark 
+              size={24} 
+              color={isBookmarked ? colors.primary : colors.textSecondary}
+              fill={isBookmarked ? colors.primary : 'transparent'}
+            />
+          </TouchableOpacity> */}
+        </View>
       </View>
 
       <ScrollView 
@@ -262,13 +289,13 @@ export default function QuestionDetail({
                 </Text>
               </View>
             </View>
-            <View style={styles.warningContainer}>
+            {/* <View style={styles.warningContainer}>
               <AlertTriangle size={20} color={colors.warning} />
-            </View>
+            </View> */}
           </View>
 
           <View style={styles.questionTextContainer}>
-            <MathRenderer content={questionText} color={colors.text} />
+            <RichContentRenderer content={questionText} subjectId={subjectId} chapterId={chapterId} color={colors.text} />
           </View>
 
           <View style={styles.examInfo}>
@@ -278,7 +305,7 @@ export default function QuestionDetail({
               </Text>
             </View>
             <Text style={[styles.examYear, { color: colors.textSecondary }]}>
-              ({question.exam_year})
+              {question.exam_year}
             </Text>
           </View>
         </Animated.View>
@@ -301,7 +328,14 @@ export default function QuestionDetail({
                     {optionLabels[index]}.
                   </Text>
                   <View style={styles.optionTextContainer}>
-                    <MathRenderer content={option} color={getOptionTextStyle(option)[1]?.color || colors.text} />
+                    {(() => {
+                      const styleArr = getOptionTextStyle(option);
+                      const colorObj = Array.isArray(styleArr)
+                        ? styleArr.find(s => typeof s === 'object' && s !== null && 'color' in s)
+                        : undefined;
+                      const color = colorObj && typeof colorObj.color === 'string' ? colorObj.color : colors.text;
+                      return <RichContentRenderer content={option} subjectId={subjectId} chapterId={chapterId} color={color} />;
+                    })()}
                   </View>
                 </View>
               </TouchableOpacity>
@@ -330,7 +364,7 @@ export default function QuestionDetail({
           >
             <Text style={[styles.solutionTitle, { color: colors.text }]}>Solution:</Text>
             <View style={styles.solutionContent}>
-              <MathRenderer content={solutionText} color={colors.text} />
+              <RichContentRenderer content={solutionText} subjectId={subjectId} chapterId={chapterId} color={colors.text} />
             </View>
           </Animated.View>
         )}
@@ -362,6 +396,13 @@ export default function QuestionDetail({
           <ChevronRight size={20} color={colors.text} />
         </TouchableOpacity>
       </View>
+
+      <ReportIssueModal
+        visible={isReportModalVisible}
+        onClose={() => setReportModalVisible(false)}
+        onSubmit={handleReportSubmit}
+        questionId={question.question_id}
+      />
     </View>
   );
 }
@@ -388,8 +429,16 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Medium',
     marginLeft: 8,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  reportButton: {
+    padding: 8,
+  },
   bookmarkButton: {
     padding: 8,
+    marginLeft: 8,
   },
   content: {
     flex: 1,

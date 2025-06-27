@@ -5,6 +5,8 @@ import { useTheme } from '@/hooks/useTheme';
 import StatsCard from '@/components/home/StatsCard';
 import { CalendarClock, Brain, Trophy, Target } from 'lucide-react-native';
 import WelcomeCard from '@/components/home/WelcomeCard';
+import axios from 'axios';
+import { useFocusEffect } from 'expo-router';
 
 type DashboardStats = {
   today: number;
@@ -28,14 +30,18 @@ export default function HomeScreen() {
   const fetchDashboardData = async () => {
     try {
       setError(null);
-      // In a real app, you would fetch data from your API here using the auth token
-      const mockData = {
-        today: Math.floor(Math.random() * 10),
-        thisWeek: Math.floor(Math.random() * 30),
-        lastWeek: Math.floor(Math.random() * 30),
-        goals: Math.floor(Math.random() * 5)
-      };
-      setStats(mockData);
+      if (user?.userId) {
+        const res = await axios.get(`https://atomm-57b7d9183bae.herokuapp.com/api/users/questions_attempted/${user.userId}`);
+        const data = Array.isArray(res.data) ? res.data[0] : res.data[0];
+        setStats({
+          today: data?.today_attempt || 0,
+          thisWeek: data?.this_week_attempt || 0,
+          lastWeek: data?.last_week_attempt || 0,
+          goals: data?.till_today_attempt || 0,
+        });
+      } else {
+        setStats({ today: 0, thisWeek: 0, lastWeek: 0, goals: 0 });
+      }
     } catch (err) {
       setError('Failed to load dashboard data');
       console.error('Dashboard data fetch error:', err);
@@ -51,6 +57,12 @@ export default function HomeScreen() {
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchDashboardData();
+    }, [user?.userId])
+  );
 
   return (
     <ScrollView 
@@ -94,7 +106,7 @@ export default function HomeScreen() {
           icon={<Trophy size={24} color="#F59E0B" />} 
         />
         <StatsCard 
-          title="Goals" 
+          title="Total" 
           value={stats.goals.toString()} 
           icon={<Target size={24} color="#10B981" />} 
         />

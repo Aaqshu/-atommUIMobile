@@ -3,8 +3,12 @@ import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Platform, Activit
 import { useTheme } from '@/hooks/useTheme';
 import { useAuth } from '@/hooks/useAuth';
 import Animated, { FadeIn, SlideInUp } from 'react-native-reanimated';
-import { Clock, Beaker, Leaf, Fish, ChevronRight, ChevronLeft, BookOpen, SquareCheck as CheckSquare, Square, Play, RotateCcw, Settings, Timer, Target, BookOpenCheck } from 'lucide-react-native';
+import { Clock, Beaker, Leaf, Fish, ChevronRight, ChevronLeft, BookOpen, SquareCheck as CheckSquare, Square, Play, RotateCcw, Settings, Timer, Target, BookOpenCheck, Flag } from 'lucide-react-native';
 import axios from 'axios';
+import QuestionStatusModal from '@/components/QuestionStatusModal';
+import { PieChart } from 'react-native-svg-charts';
+import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 
 type Subject = {
   id: string;
@@ -51,7 +55,7 @@ type TestConfiguration = {
 
 type TestQuestion = {
   question_id: string;
-  question_text: string;
+  question: string;
   option_a: string;
   option_b: string;
   option_c: string;
@@ -86,6 +90,95 @@ export default function CreateTestScreen() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<{ [questionId: string]: string }>({});
   const [showResults, setShowResults] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [bookmarkedQuestions, setBookmarkedQuestions] = useState<{ [questionId: string]: boolean }>({});
+  const [resultData, setResultData] = useState<any>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [createTestResponse, setCreateTestResponse] = useState<any>(null);
+  const [previousTests, setPreviousTests] = useState<any[]>([]);
+  const [loadingPrevious, setLoadingPrevious] = useState(false);
+  const [showTestCreation, setShowTestCreation] = useState(false);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [fetchedReport, setFetchedReport] = useState<any>(null);
+
+  const SUBJECT_PREFIXES: Record<string, string[]> = {
+    Physics: ['p11', 'p12'],
+    Chemistry: ['c11', 'c12'],
+    Botany: ['b11', 'b12'],
+    Zoology: ['z11', 'z12'],
+  };
+  const SUBJECTS = ['Physics', 'Chemistry', 'Botany', 'Zoology'];
+  const [selectedTestSubject, setSelectedTestSubject] = useState('Physics');
+
+  // Reset timer when test configuration changes
+  useEffect(() => {
+    setTimeRemaining(testConfig.testDuration * 60);
+  }, [testConfig.testDuration]);
+
+  useEffect(() => {
+    if (currentStep === 'test' && !showResults) {
+      const timer = setInterval(() => {
+        setTimeRemaining((prevTime) => {
+          if (prevTime <= 0) {
+            clearInterval(timer);
+            handleSubmitTest();
+            return 0;
+          }
+          return prevTime - 1;
+        });
+      }, 1000);
+
+      return () => clearInterval(timer);
+    }
+  }, [currentStep, showResults]);
+
+  // Fetch previous tests on mount/tab focus
+  useFocusEffect(
+    React.useCallback(() => {
+      const fetchPreviousTests = async () => {
+        setLoadingPrevious(true);
+        try {
+          const res = await axios.get(`https://atomm-57b7d9183bae.herokuapp.com/api/users/get_test_reports/${user?.userId}`);
+          setPreviousTests(res.data.data || []);
+        } catch (err) {
+          setPreviousTests([]);
+        } finally {
+          setLoadingPrevious(false);
+        }
+      };
+      // Always reset test creation/result state on tab focus
+      setShowTestCreation(false);
+      setShowResults(false);
+      setResultData(null);
+      setCurrentStep('subject');
+      setSelectedSubject(null);
+      setSelectedClass('11');
+      setSelectedChapter(null);
+      setSelectedSubtopics(new Set());
+      setSelectedChapters([]);
+      setSubtopics([]);
+      setChapters([]);
+      setError(null);
+      setTestQuestions([]);
+      setCurrentQuestionIndex(0);
+      setSelectedAnswers({});
+      setTestConfig({
+        testName: '',
+        noOfQuestions: 30,
+        testDuration: 60,
+        difficultyLevel: 'medium',
+        examType: 'neet'
+      });
+      fetchPreviousTests();
+    }, [])
+  );
+
+  const formatTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
 
   const subjects: Subject[] = [
     {
@@ -235,6 +328,7 @@ export default function CreateTestScreen() {
       );
 
       setTestQuestions(response.data.questions || []);
+      setCreateTestResponse(response.data);
       setCurrentStep('test');
     } catch (err) {
       console.error('Error creating test:', err);
@@ -347,8 +441,67 @@ export default function CreateTestScreen() {
     }
   };
 
-  const handleSubmitTest = () => {
+  const handleSubmitTest = async () => {
     setShowResults(true);
+    setSubmitting(true);
+    // Prepare payload
+    const total_correct: string[] = [];
+    const total_incorrect: string[] = [];
+    const unattempt: string[] = [];
+    const marked_questions: string[] = [];
+    const wrong_options: Record<string, string> = {};
+    testQuestions.forEach((q) => {
+      const userAnswer = selectedAnswers[q.question_id];
+      const isBookmarked = bookmarkedQuestions[q.question_id] || false;
+      if (isBookmarked) marked_questions.push(q.question_id);
+      if (!userAnswer) {
+        unattempt.push(q.question_id);
+      } else if (userAnswer === q.correct_answer) {
+        total_correct.push(q.question_id);
+      } else {
+        total_incorrect.push(q.question_id);
+        wrong_options[q.question_id] = userAnswer;
+      }
+    });
+    const payload = {
+      test_id: null,
+      user_id: user?.userId || 'guest_bgzy8ck84',
+      test_name: testConfig.testName,
+      total_correct: JSON.stringify(total_correct),
+      total_incorrect: JSON.stringify(total_incorrect),
+      unattempt: JSON.stringify(unattempt),
+      marked_questions: JSON.stringify(marked_questions),
+      wrong_options: JSON.stringify(wrong_options),
+      savedPayload: createTestResponse,
+    };
+    try {
+      const response = await axios.post(
+        'https://atomm-57b7d9183bae.herokuapp.com/api/users/save_test_report',
+        payload,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      setResultData({
+        ...payload,
+        ...response.data,
+        correct: total_correct.length,
+        incorrect: total_incorrect.length,
+        unattempted: unattempt.length,
+        total: testQuestions.length,
+        marks: total_correct.length * 4 - total_incorrect.length * 1,
+        percentage: testQuestions.length > 0 ? (((total_correct.length * 4 - total_incorrect.length * 1) / (testQuestions.length * 4)) * 100).toFixed(2) : '0.00',
+      });
+    } catch (err) {
+      setResultData({
+        error: true,
+        message: 'Failed to save test report',
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const calculateResults = () => {
@@ -396,6 +549,75 @@ export default function CreateTestScreen() {
       difficultyLevel: 'medium',
       examType: 'neet'
     });
+  };
+
+  // Helper to build status data for modal
+  const getStatusData = () => {
+    let attempted = 0, seen = 0, unseen = 0, marked = 0;
+    testQuestions.forEach((q, idx) => {
+      const userAnswer = selectedAnswers[q.question_id];
+      const isBookmarked = bookmarkedQuestions[q.question_id] || false;
+      if (userAnswer) attempted++;
+      else if (idx <= currentQuestionIndex) seen++;
+      else unseen++;
+      if (isBookmarked) marked++;
+    });
+    return {
+      attempted,
+      seen,
+      unseen,
+      marked,
+      correctScore: 4,
+      incorrectScore: -1,
+    };
+  };
+
+  // Helper to build question grid for modal
+  const getQuestionGrid = () =>
+    testQuestions.map((q, idx) => {
+      const userAnswer = selectedAnswers[q.question_id];
+      const isBookmarked = bookmarkedQuestions[q.question_id] || false;
+      let status: 'attempted' | 'seen' | 'unseen';
+      if (userAnswer) status = 'attempted';
+      else if (idx <= currentQuestionIndex) status = 'seen';
+      else status = 'unseen';
+      return {
+        number: idx + 1,
+        status: status as 'attempted' | 'seen' | 'unseen',
+        marked: isBookmarked,
+        selected: idx === currentQuestionIndex,
+      };
+    });
+
+  // Function to toggle bookmark for a question
+  const toggleBookmark = (questionId: string) => {
+    setBookmarkedQuestions(prev => ({
+      ...prev,
+      [questionId]: !prev[questionId],
+    }));
+  };
+
+  // Helper to get subject from question_id
+  function getSubjectFromQuestionId(qid: string) {
+    if (qid.startsWith('p11') || qid.startsWith('p12')) return 'Physics';
+    if (qid.startsWith('c11') || qid.startsWith('c12')) return 'Chemistry';
+    if (qid.startsWith('b11') || qid.startsWith('b12')) return 'Botany';
+    if (qid.startsWith('z11') || qid.startsWith('z12')) return 'Zoology';
+    return 'Other';
+  }
+
+  const handlePreviousTestClick = async (test_id: string) => {
+    setLoadingReport(true);
+    setFetchedReport(null);
+    setError(null);
+    try {
+      const response = await axios.get(`https://atomm-57b7d9183bae.herokuapp.com/api/users/get_test_report_by_id/${test_id}`);
+      setFetchedReport(response.data.data);
+    } catch (err) {
+      setError('Failed to load test report.');
+    } finally {
+      setLoadingReport(false);
+    }
   };
 
   const renderTestConfiguration = () => (
@@ -557,101 +779,93 @@ export default function CreateTestScreen() {
   );
 
   const renderTestInterface = () => {
-    if (testQuestions.length === 0) {
+    // Filter questions by selected subject
+    const subjectPrefixes = SUBJECT_PREFIXES[selectedTestSubject] || [];
+    const subjectQuestions = testQuestions.filter(q =>
+      subjectPrefixes.some(prefix => q.question_id.startsWith(prefix))
+    );
+    const currentSubjectQuestion = subjectQuestions[currentQuestionIndex] || subjectQuestions[0];
+    const userAnswer = currentSubjectQuestion ? selectedAnswers[currentSubjectQuestion.question_id] : undefined;
+
+    if (subjectQuestions.length === 0) {
       return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
-          <View style={styles.emptyTestContainer}>
-            <Text style={[styles.emptyTestText, { color: colors.textSecondary }]}>
-              No questions available for this test configuration.
-            </Text>
-            <TouchableOpacity
-              style={[styles.backToConfigButton, { backgroundColor: colors.primary }]}
-              onPress={() => setCurrentStep('configure')}
-            >
-              <Text style={styles.backToConfigButtonText}>Back to Configuration</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={[styles.container, { backgroundColor: colors.background }]}> 
+          <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 32 }}>No questions available for {selectedTestSubject}.</Text>
         </View>
       );
     }
-
-    if (showResults) {
-      const results = calculateResults();
-      return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
-          <ScrollView style={styles.resultsContainer} contentContainerStyle={styles.resultsContent}>
-            <Text style={[styles.resultsTitle, { color: colors.text }]}>Test Results</Text>
-            
-            <View style={[styles.resultsCard, { backgroundColor: colors.cardBackground }]}>
-              <View style={styles.resultRow}>
-                <Text style={[styles.resultLabel, { color: colors.textSecondary }]}>Score:</Text>
-                <Text style={[styles.resultValue, { color: colors.success }]}>
-                  {results.correct}/{results.total} ({results.percentage}%)
-                </Text>
-              </View>
-              <View style={styles.resultRow}>
-                <Text style={[styles.resultLabel, { color: colors.textSecondary }]}>Attempted:</Text>
-                <Text style={[styles.resultValue, { color: colors.text }]}>{results.attempted}</Text>
-              </View>
-              <View style={styles.resultRow}>
-                <Text style={[styles.resultLabel, { color: colors.textSecondary }]}>Correct:</Text>
-                <Text style={[styles.resultValue, { color: colors.success }]}>{results.correct}</Text>
-              </View>
-              <View style={styles.resultRow}>
-                <Text style={[styles.resultLabel, { color: colors.textSecondary }]}>Incorrect:</Text>
-                <Text style={[styles.resultValue, { color: colors.danger }]}>{results.incorrect}</Text>
-              </View>
-              <View style={styles.resultRow}>
-                <Text style={[styles.resultLabel, { color: colors.textSecondary }]}>Unattempted:</Text>
-                <Text style={[styles.resultValue, { color: colors.warning }]}>{results.unattempted}</Text>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.newTestButton, { backgroundColor: colors.primary }]}
-              onPress={handleReset}
-            >
-              <Text style={styles.newTestButtonText}>Create New Test</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      );
-    }
-
-    const currentQuestion = testQuestions[currentQuestionIndex];
-    const userAnswer = selectedAnswers[currentQuestion.question_id];
 
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}> 
+        {/* Subject Tabs */}
+        <View style={{ flexDirection: 'row', marginTop: 12, marginBottom: 8, justifyContent: 'center' }}>
+          {SUBJECTS.map(subject => {
+            const subjectPrefixes = SUBJECT_PREFIXES[subject] || [];
+            const hasQuestions = testQuestions.some(q => subjectPrefixes.some(prefix => q.question_id.startsWith(prefix)));
+            return (
+              <TouchableOpacity
+                key={subject}
+                style={{
+                  paddingVertical: 8,
+                  paddingHorizontal: 18,
+                  borderBottomWidth: 3,
+                  borderBottomColor: selectedTestSubject === subject ? colors.primary : 'transparent',
+                  marginHorizontal: 4,
+                  opacity: hasQuestions ? 1 : 0.4,
+                }}
+                onPress={hasQuestions ? () => {
+                  setSelectedTestSubject(subject);
+                  setCurrentQuestionIndex(0);
+                } : undefined}
+                disabled={!hasQuestions}
+              >
+                <Text style={{ color: selectedTestSubject === subject ? colors.primary : colors.textSecondary, fontWeight: 'bold', fontSize: 16 }}>{subject}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
         {/* Test Header */}
-        <View style={[styles.testHeader, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
+        <View style={[styles.testHeader, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}> 
           <Text style={[styles.testTitle, { color: colors.text }]}>{testConfig.testName}</Text>
           <View style={styles.testProgress}>
-            <Text style={[styles.progressText, { color: colors.textSecondary }]}>
-              {currentQuestionIndex + 1} of {testQuestions.length}
+            <Text style={[styles.progressText, { color: colors.textSecondary }]}> 
+              {currentQuestionIndex + 1} of {subjectQuestions.length}
             </Text>
-            <Timer size={16} color={colors.textSecondary} />
+            <View style={styles.timerContainer}>
+              <Timer size={16} color={timeRemaining <= 300 ? colors.danger : colors.textSecondary} />
+              <Text style={[
+                styles.timerText,
+                { color: timeRemaining <= 300 ? colors.danger : colors.textSecondary }
+              ]}>
+                {formatTime(timeRemaining)}
+              </Text>
+            </View>
+            {/* Status Modal Button */}
+            <TouchableOpacity onPress={() => setShowStatusModal(true)} style={{ marginLeft: 12 }}>
+              <Text style={{ color: colors.primary, fontWeight: 'bold' }}>View Status</Text>
+            </TouchableOpacity>
           </View>
         </View>
-
         <ScrollView style={styles.questionContainer} contentContainerStyle={styles.questionContent}>
           {/* Question */}
-          <View style={[styles.questionCard, { backgroundColor: colors.cardBackground }]}>
-            <Text style={[styles.questionNumber, { color: colors.primary }]}>
+          <View style={[styles.questionCard, { backgroundColor: colors.cardBackground }]}> 
+            <Text style={[styles.questionNumber, { color: colors.primary }]}> 
               Question {currentQuestionIndex + 1}
             </Text>
-            <Text style={[styles.questionText, { color: colors.text }]}>
-              {currentQuestion.question_text}
+            <Text style={[styles.questionText, { color: colors.text }]}> 
+              {currentSubjectQuestion.question}
             </Text>
+            {/* Bookmark Button */}
+            <TouchableOpacity onPress={() => toggleBookmark(currentSubjectQuestion.question_id)} style={{ position: 'absolute', top: 12, right: 12 }}>
+              <Flag size={22} color={bookmarkedQuestions[currentSubjectQuestion.question_id] ? colors.primary : colors.textSecondary} />
+            </TouchableOpacity>
           </View>
-
           {/* Options */}
           <View style={styles.optionsContainer}>
             {['option_a', 'option_b', 'option_c', 'option_d'].map((optionKey, index) => {
-              const optionValue = currentQuestion[optionKey as keyof TestQuestion] as string;
+              const optionValue = currentSubjectQuestion[optionKey as keyof TestQuestion] as string;
               const optionLabel = String.fromCharCode(65 + index); // A, B, C, D
               const isSelected = userAnswer === optionValue;
-
               return (
                 <TouchableOpacity
                   key={optionKey}
@@ -662,7 +876,7 @@ export default function CreateTestScreen() {
                       borderColor: isSelected ? colors.primary : colors.border
                     }
                   ]}
-                  onPress={() => handleAnswerSelect(currentQuestion.question_id, optionValue)}
+                  onPress={() => handleAnswerSelect(currentSubjectQuestion.question_id, optionValue)}
                 >
                   <Text style={[
                     styles.optionLabel,
@@ -681,9 +895,8 @@ export default function CreateTestScreen() {
             })}
           </View>
         </ScrollView>
-
         {/* Navigation Footer */}
-        <View style={[styles.testFooter, { backgroundColor: colors.cardBackground, borderTopColor: colors.border }]}>
+        <View style={[styles.testFooter, { backgroundColor: colors.cardBackground, borderTopColor: colors.border, justifyContent: 'space-between' }]}> 
           <TouchableOpacity
             style={[styles.navButton, currentQuestionIndex === 0 && { opacity: 0.5 }]}
             onPress={handlePreviousQuestion}
@@ -692,30 +905,39 @@ export default function CreateTestScreen() {
             <ChevronLeft size={20} color={colors.text} />
             <Text style={[styles.navButtonText, { color: colors.text }]}>Previous</Text>
           </TouchableOpacity>
-
-          {currentQuestionIndex === testQuestions.length - 1 ? (
-            <TouchableOpacity
-              style={[styles.submitButton, { backgroundColor: colors.success }]}
-              onPress={handleSubmitTest}
-            >
-              <Text style={styles.submitButtonText}>Submit Test</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[styles.navButton]}
-              onPress={handleNextQuestion}
-            >
-              <Text style={[styles.navButtonText, { color: colors.text }]}>Next</Text>
-              <ChevronRight size={20} color={colors.text} />
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[styles.submitButton, { backgroundColor: colors.success, marginHorizontal: 8 }]}
+            onPress={handleSubmitTest}
+          >
+            <Text style={styles.submitButtonText}>Submit Test</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.navButton, currentQuestionIndex === subjectQuestions.length - 1 && { opacity: 0.5 }]}
+            onPress={handleNextQuestion}
+            disabled={currentQuestionIndex === subjectQuestions.length - 1}
+          >
+            <Text style={[styles.navButtonText, { color: colors.text }]}>Next</Text>
+            <ChevronRight size={20} color={colors.text} />
+          </TouchableOpacity>
         </View>
+        {/* Status Modal */}
+        <QuestionStatusModal
+          visible={showStatusModal}
+          onClose={() => setShowStatusModal(false)}
+          statusData={getStatusData()}
+          questions={getQuestionGrid()}
+          title={`${selectedTestSubject}`}
+        />
       </View>
     );
   };
 
   const renderSubjectSelection = () => (
     <Animated.View entering={FadeIn.duration(600)} style={styles.stepContainer}>
+      <TouchableOpacity style={styles.backButton} onPress={() => setShowTestCreation(false)}>
+        <ChevronLeft size={20} color={colors.primary} />
+        <Text style={[styles.backText, { color: colors.primary }]}>Back to Previous Tests</Text>
+      </TouchableOpacity>
       <Text style={[styles.stepTitle, { color: colors.text }]}>Select a Subject</Text>
       <View style={styles.subjectsGrid}>
         {subjects.map((subject, index) => (
@@ -978,25 +1200,239 @@ export default function CreateTestScreen() {
     );
   };
 
+  const renderResultScreen = (report: any) => {
+    if (!report) return null;
+    // Use questions from savedPayload if available (for previous test results)
+    const questions = report.savedPayload?.questions || testQuestions;
+    const { correct, incorrect, unattempted, marks, percentage, total } = report;
+    const chartData = [
+      {
+        key: 1,
+        value: correct,
+        svg: { fill: '#22c55e' },
+        label: 'Correct',
+      },
+      {
+        key: 2,
+        value: incorrect,
+        svg: { fill: '#ef4444' },
+        label: 'Incorrect',
+      },
+      {
+        key: 3,
+        value: unattempted,
+        svg: { fill: '#94a3b8' },
+        label: 'Unattempted',
+      },
+    ];
+
+    // Subject-wise analysis
+    let subjectStats: Record<string, { correct: number; incorrect: number; unattempted: number }> = {};
+    if (questions && questions.length > 0) {
+      const correctIds = JSON.parse(report.total_correct || '[]');
+      const incorrectIds = JSON.parse(report.total_incorrect || '[]');
+      const unattemptedIds = JSON.parse(report.unattempt || '[]');
+      questions.forEach((q: TestQuestion) => {
+        const subject = getSubjectFromQuestionId(q.question_id);
+        if (!subjectStats[subject]) subjectStats[subject] = { correct: 0, incorrect: 0, unattempted: 0 };
+        if (correctIds.includes(q.question_id)) subjectStats[subject].correct++;
+        else if (incorrectIds.includes(q.question_id)) subjectStats[subject].incorrect++;
+        else if (unattemptedIds.includes(q.question_id)) subjectStats[subject].unattempted++;
+      });
+    }
+    const subjectsInTest = Object.keys(subjectStats);
+
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16 }}>
+        {/* Back Button */}
+        <TouchableOpacity onPress={() => { setFetchedReport(null); setLoadingReport(false); }} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+          <ChevronLeft size={20} color={colors.primary} />
+          <Text style={{ color: colors.primary, fontWeight: 'bold', marginLeft: 6 }}>Back</Text>
+        </TouchableOpacity>
+        {/* Score Summary */}
+        <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2 }}>
+          <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>Performance Overview</Text>
+          <View style={{ height: 200, marginVertical: 16, alignItems: 'center', justifyContent: 'center' }}>
+            {(chartData[0].value > 0 || chartData[1].value > 0 || chartData[2].value > 0) ? (
+              <PieChart
+                style={{ height: 180, width: 180 }}
+                data={chartData}
+                innerRadius={60}
+                padAngle={0.02}
+              />
+            ) : (
+              <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 32 }}>No data available for chart.</Text>
+            )}
+          </View>
+          {/* Legend */}
+          <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 8 }}>
+              <View style={{ width: 16, height: 16, backgroundColor: '#22c55e', borderRadius: 3, marginRight: 6 }} />
+              <Text style={{ color: '#22c55e', fontWeight: '500', fontSize: 15 }}>Correct</Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 8 }}>
+              <View style={{ width: 16, height: 16, backgroundColor: '#ef4444', borderRadius: 3, marginRight: 6 }} />
+              <Text style={{ color: '#ef4444', fontWeight: '500', fontSize: 15 }}>Incorrect</Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 8 }}>
+              <View style={{ width: 16, height: 16, backgroundColor: '#94a3b8', borderRadius: 3, marginRight: 6 }} />
+              <Text style={{ color: '#94a3b8', fontWeight: '500', fontSize: 15 }}>Unattempted</Text>
+            </View>
+          </View>
+        </View>
+        {/* Subject-wise Analysis */}
+        <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 24, elevation: 2 }}>
+          <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>Subject-wise Analysis</Text>
+          {subjectsInTest.length > 0 ? (
+            subjectsInTest.map(subject => (
+              <View key={subject} style={{ marginBottom: 10 }}>
+                <Text style={{ color: '#334155', fontWeight: 'bold', fontSize: 15, marginBottom: 6 }}>{subject}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ color: '#22c55e', fontWeight: 'bold', fontSize: 20, marginRight: 4 }}>✔</Text>
+                    <Text style={{ color: '#22c55e', fontWeight: 'bold', fontSize: 16, marginRight: 2 }}>{subjectStats[subject].correct}</Text>
+                    <Text style={{ color: '#22c55e', fontSize: 15, marginRight: 12 }}>Correct</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ color: '#ef4444', fontWeight: 'bold', fontSize: 20, marginRight: 4 }}>✖</Text>
+                    <Text style={{ color: '#ef4444', fontWeight: 'bold', fontSize: 16, marginRight: 2 }}>{subjectStats[subject].incorrect}</Text>
+                    <Text style={{ color: '#ef4444', fontSize: 15, marginRight: 12 }}>Incorrect</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ color: '#64748b', fontWeight: 'bold', fontSize: 20, marginRight: 4 }}>⦸</Text>
+                    <Text style={{ color: '#64748b', fontWeight: 'bold', fontSize: 16, marginRight: 2 }}>{subjectStats[subject].unattempted}</Text>
+                    <Text style={{ color: '#64748b', fontSize: 15 }}>Unattempted</Text>
+                  </View>
+                </View>
+              </View>
+            ))
+          ) : (
+            <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 12 }}>No data available for subject-wise analysis.</Text>
+          )}
+        </View>
+        {/* Action Buttons */}
+        <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 32, gap: 16 }}>
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: '#2563eb', paddingVertical: 14, borderRadius: 10, alignItems: 'center', marginRight: 8 }}
+            onPress={() => {
+              setShowTestCreation(true);
+              setFetchedReport(null);
+              setLoadingReport(false);
+              setResultData(null);
+            }}
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Create Test</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: '#22c55e', paddingVertical: 14, borderRadius: 10, alignItems: 'center', marginLeft: 8, opacity: report?.test_id ? 1 : 0.5 }}
+            onPress={() => report?.test_id && router.push({ pathname: '/(tabs)/solution', params: { test_id: report.test_id } })}
+            disabled={!report?.test_id}
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>See Solution</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    );
+  };
+
+  if (resultData) {
+    return renderResultScreen(resultData);
+  }
+
   if (currentStep === 'test') {
     return renderTestInterface();
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView 
-        style={styles.content}
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        {renderSelectedChapters()}
-        
-        {currentStep === 'subject' && renderSubjectSelection()}
-        {currentStep === 'class' && renderClassSelection()}
-        {currentStep === 'chapters' && renderChapterSelection()}
-        {currentStep === 'subtopics' && renderSubtopicSelection()}
-        {currentStep === 'configure' && renderTestConfiguration()}
-      </ScrollView>
+    <View style={[styles.container, { backgroundColor: colors.background }]}> 
+      {!showTestCreation ? (
+        loadingReport ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={{ color: colors.textSecondary, marginTop: 12 }}>Loading report...</Text>
+          </View>
+        ) : fetchedReport ? (
+          renderResultScreen(fetchedReport)
+        ) : (
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
+            <Text style={{ fontSize: 22, fontWeight: 'bold', marginBottom: 16, color: colors.text }}>Previous Tests</Text>
+            {loadingPrevious ? (
+              <ActivityIndicator size="large" color={colors.primary} />
+            ) : previousTests.length === 0 ? (
+              <Text style={{ color: colors.textSecondary, textAlign: 'center', marginBottom: 24 }}>No previous tests found.</Text>
+            ) : (
+              previousTests.map((test, idx) => {
+                const correct = JSON.parse(test.total_correct || '[]').length;
+                const incorrect = JSON.parse(test.total_incorrect || '[]').length;
+                const unattempted = JSON.parse(test.unattempt || '[]').length;
+                const total = correct + incorrect + unattempted;
+                const percentage = total > 0 ? ((correct / total) * 100).toFixed(1) : '0.0';
+                const date = new Date(test.createdAt);
+                const score = correct * 4 - incorrect * 1;
+                return (
+                  <TouchableOpacity key={test.test_id} onPress={() => handlePreviousTestClick(test.test_id)} activeOpacity={0.7}>
+                    <View style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, padding: 16, marginBottom: 20, backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <Text style={{ fontWeight: 'bold', fontSize: 18, color: colors.text }}>{test.test_name}</Text>
+                        <View style={{ backgroundColor: '#fee2e2', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 2 }}>
+                          <Text style={{ color: '#ef4444', fontWeight: 'bold', fontSize: 14 }}>{percentage}%</Text>
+                        </View>
+                      </View>
+                      <Text style={{ color: colors.textSecondary, fontSize: 14, marginBottom: 12 }}>
+                        {date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <View style={{ flex: 1, alignItems: 'center', backgroundColor: '#f0fdf4', borderRadius: 8, padding: 8, marginRight: 4 }}>
+                          <Text style={{ color: '#22c55e', fontWeight: 'bold' }}>Correct</Text>
+                          <Text style={{ color: '#22c55e', fontWeight: 'bold', fontSize: 18 }}>{correct}</Text>
+                        </View>
+                        <View style={{ flex: 1, alignItems: 'center', backgroundColor: '#fef2f2', borderRadius: 8, padding: 8, marginHorizontal: 4 }}>
+                          <Text style={{ color: '#ef4444', fontWeight: 'bold' }}>Incorrect</Text>
+                          <Text style={{ color: '#ef4444', fontWeight: 'bold', fontSize: 18 }}>{incorrect}</Text>
+                        </View>
+                        <View style={{ flex: 1, alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: 8, padding: 8, marginLeft: 4 }}>
+                          <Text style={{ color: '#64748b', fontWeight: 'bold' }}>Unattempted</Text>
+                          <Text style={{ color: '#64748b', fontWeight: 'bold', fontSize: 18 }}>{unattempted}</Text>
+                        </View>
+                      </View>
+                      <Text style={{ textAlign: 'center', color: '#2563eb', fontWeight: 'bold', fontSize: 18, marginTop: 8 }}>Total Score {score}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+            {/* Always show Create Test button at the bottom */}
+            <TouchableOpacity
+              style={{ backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 16, alignItems: 'center', marginTop: 8 }}
+              onPress={() => {
+                setShowTestCreation(true);
+                setFetchedReport(null);
+                setLoadingReport(false);
+                setResultData(null);
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 18 }}>+ Create Test</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        )
+      ) : (
+        showResults && resultData ? (
+          renderResultScreen(resultData)
+        ) : (
+          <ScrollView 
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+          >
+            {renderSelectedChapters()}
+            {currentStep === 'subject' && renderSubjectSelection()}
+            {currentStep === 'class' && renderClassSelection()}
+            {currentStep === 'chapters' && renderChapterSelection()}
+            {currentStep === 'subtopics' && renderSubtopicSelection()}
+            {currentStep === 'configure' && renderTestConfiguration()}
+          </ScrollView>
+        )
+      )}
     </View>
   );
 }
@@ -1374,6 +1810,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   progressText: {
+    fontSize: 14,
+    fontFamily: 'Inter-Medium',
+  },
+  timerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  timerText: {
     fontSize: 14,
     fontFamily: 'Inter-Medium',
   },

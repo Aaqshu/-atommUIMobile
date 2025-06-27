@@ -73,7 +73,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     androidClientId: googleAuthConfig.androidClientId,
     iosClientId: googleAuthConfig.iosClientId,
     webClientId: googleAuthConfig.webClientId,
-    expoClientId: googleAuthConfig.expoClientId,
   });
 
   useEffect(() => {
@@ -166,12 +165,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = async () => {
     try {
       setIsLoading(true);
+      // Clear all local storage on logout
+      if (Platform.OS === 'web') {
+        localStorage.clear();
+      }
       await removeData('user');
       setUser(null);
       setIsAuthenticated(false);
       setLoginError(null);
-      
-      // Force navigation to the root route
+      // Use router.replace for consistent navigation across platforms
       router.replace('/');
     } catch (error) {
       console.error('Logout error:', error);

@@ -32,7 +32,7 @@ export function processQuestionContent(
   }
 
   // Combined regex for all LaTeX image commands (double-escaped for TS)
-  const combinedRegex = /\\\begin\{center\}\\\includegraphics\[.*?\]\{(.*?)\}\\\end\{center\}|\\\includegraphics\[.*?\]\{(.*?)\}|\\\includegraphics\[max width=\\textwidth\]\{(.*?)\}/g;
+  const combinedRegex = /\\begin\{center\}\\includegraphics(?:\[.*?\])?\{(.*?)\}\\end\{center\}|\\includegraphics(?:\[.*?\])?\{(.*?)\}/g;
 
   let result: (string | React.ReactNode)[] = [];
   let lastIndex = 0;
@@ -83,4 +83,4 @@ export function processQuestionContent(
   } else {
     return result;
   }
-} 
+}

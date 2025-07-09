@@ -2,6 +2,7 @@ import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
+import * as AuthSession from 'expo-auth-session';
 import { Platform } from 'react-native';
 import { googleAuthConfig } from '@/config/auth';
 import { loginAsGuest } from '@/services/authService';
@@ -12,6 +13,8 @@ WebBrowser.maybeCompleteAuthSession();
 export type User = {
   userId: string;
   username: string;
+  email?: string;
+  picture?: string;
   token: string;
   role?: string;
 };
@@ -63,6 +66,12 @@ const removeData = async (key: string) => {
   }
 };
 
+// Generate the correct redirect URI for native (standalone/EAS) builds
+const redirectUri = AuthSession.makeRedirectUri({
+  scheme: 'com.atommclass', // Must match app.json and AndroidManifest.xml
+  path: 'oauth2redirect/google', // Must match AndroidManifest.xml if path is used
+});
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -73,6 +82,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     androidClientId: googleAuthConfig.androidClientId,
     iosClientId: googleAuthConfig.iosClientId,
     webClientId: googleAuthConfig.webClientId,
+    redirectUri,
   });
 
   useEffect(() => {
@@ -96,19 +106,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   useEffect(() => {
+    const fetchGoogleUserInfo = async (accessToken: string) => {
+      try {
+        const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const userInfo = await res.json();
+        const userData = {
+          userId: userInfo.sub,
+          username: userInfo.name,
+          email: userInfo.email,
+          picture: userInfo.picture,
+          token: accessToken,
+          role: 'user',
+        };
+        handleSuccessfulLogin(userData);
+      } catch (error) {
+        setLoginError('Failed to fetch user info');
+      }
+    };
+
     if (response?.type === 'success') {
       const { authentication } = response;
-      
-      // Here you would normally make an API call to your backend with the Google token
-      // For this example, we'll simulate a successful login
-      const mockUser = {
-        userId: 'google_user_123',
-        username: 'Google User',
-        token: authentication?.accessToken || '',
-        role: 'user'
-      };
-      
-      handleSuccessfulLogin(mockUser);
+      if (authentication?.accessToken) {
+        fetchGoogleUserInfo(authentication.accessToken);
+      }
     }
   }, [response]);
 
@@ -127,7 +149,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const login = async () => {
     try {
       setLoginError(null);
-      await promptAsync();
+      await promptAsync(); // No options needed for EAS/standalone builds
     } catch (error) {
       console.error('Login error:', error);
       setLoginError('Failed to login with Google');

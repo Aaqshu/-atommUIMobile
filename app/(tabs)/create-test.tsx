@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Platform, ActivityIndicator, TextInput, Alert } from 'react-native';
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Platform, ActivityIndicator, TextInput, Alert, Image } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
 import { useAuth } from '@/hooks/useAuth';
 import Animated, { FadeIn, SlideInUp } from 'react-native-reanimated';
 import { Clock, Beaker, Leaf, Fish, ChevronRight, ChevronLeft, BookOpen, SquareCheck as CheckSquare, Square, Play, RotateCcw, Settings, Timer, Target, BookOpenCheck, Flag } from 'lucide-react-native';
 import axios from 'axios';
 import QuestionStatusModal from '@/components/QuestionStatusModal';
+import TestQuestionDetail from '@/components/questions/TestQuestionDetail';
 import { PieChart } from 'react-native-svg-charts';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 type Subject = {
   id: string;
@@ -65,6 +67,59 @@ type TestQuestion = {
   exam_type: string;
   exam_year: string;
 };
+
+let MathView: any = null;
+if (Platform.OS !== 'web') {
+  MathView = require('react-native-math-view').default;
+}
+
+// Utility to sanitize LaTeX for better native rendering
+function sanitizeLatex(content: string) {
+  if (!content) return '';
+  return content
+    .replace(/\\begin{array}{([^}]*)}/g, '\\begin{array}{$1} ')
+    .replace(/\\end{array}/g, ' \\end{array}')
+    .replace(/\\begin{([^}]*)}/g, ' \\begin{$1} ')
+    .replace(/\\end{([^}]*)}/g, ' \\end{$1} ')
+    .replace(/\\\\/g, ' \\\\ ')
+    .replace(/&/g, ' & ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanLatex(str: string) {
+  if (!str) return '';
+  const cleaned = str.replace(/\$/g, '').trim();
+  return sanitizeLatex(cleaned);
+}
+
+function renderQuestionContent(questionToRender: string, colors: any) {
+  if (!questionToRender) return null;
+  questionToRender = questionToRender.replace(/\n/g, ' ');
+  const parts = questionToRender.split(/(\!\[.*?\]\(.*?\)|`[^`]*`|\$[^$]*\$)/g);
+  return parts.map((part, idx) => {
+    // Image part
+    if (part.startsWith('![') && part.includes('](')) {
+      const match = part.match(/\!\[(.*?)\]\((.*?)\)/);
+      if (match) {
+        const imageUrl = match[2];
+        return (
+          <Image
+            key={idx}
+            source={{ uri: imageUrl }}
+            style={{ width: '100%', height: 200, resizeMode: 'contain', marginVertical: 8 }}
+          />
+        );
+      }
+    }
+    // LaTeX part
+    if (part.startsWith('$') && part.endsWith('$')) {
+      return <MathView key={idx} math={cleanLatex(part)} style={{ color: colors.text }} />;
+    }
+    // Plain text part
+    return <Text key={idx} style={{ flexWrap: 'wrap', color: colors.text, fontSize: 16 }}>{part}</Text>;
+  });
+}
 
 export default function CreateTestScreen() {
   const { colors } = useTheme();
@@ -795,6 +850,18 @@ export default function CreateTestScreen() {
       );
     }
 
+    // Get subject and chapter info for the current question
+    const getSubjectFromQuestionId = (qid: string) => {
+      if (qid.startsWith('p11') || qid.startsWith('p12')) return 'physics';
+      if (qid.startsWith('c11') || qid.startsWith('c12')) return 'chemistry';
+      if (qid.startsWith('b11') || qid.startsWith('b12')) return 'botany';
+      if (qid.startsWith('z11') || qid.startsWith('z12')) return 'zoology';
+      return 'physics';
+    };
+
+    const currentSubjectId = getSubjectFromQuestionId(currentSubjectQuestion.question_id);
+    const currentChapterId = 'default'; // You can enhance this if you have chapter info
+
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}> 
         {/* Subject Tabs */}
@@ -846,80 +913,36 @@ export default function CreateTestScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <ScrollView style={styles.questionContainer} contentContainerStyle={styles.questionContent}>
-          {/* Question */}
-          <View style={[styles.questionCard, { backgroundColor: colors.cardBackground }]}> 
-            <Text style={[styles.questionNumber, { color: colors.primary }]}> 
-              Question {currentQuestionIndex + 1}
-            </Text>
-            <Text style={[styles.questionText, { color: colors.text }]}> 
-              {currentSubjectQuestion.question}
-            </Text>
-            {/* Bookmark Button */}
-            <TouchableOpacity onPress={() => toggleBookmark(currentSubjectQuestion.question_id)} style={{ position: 'absolute', top: 12, right: 12 }}>
-              <Flag size={22} color={bookmarkedQuestions[currentSubjectQuestion.question_id] ? colors.primary : colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
-          {/* Options */}
-          <View style={styles.optionsContainer}>
-            {['option_a', 'option_b', 'option_c', 'option_d'].map((optionKey, index) => {
-              const optionValue = currentSubjectQuestion[optionKey as keyof TestQuestion] as string;
-              const optionLabel = String.fromCharCode(65 + index); // A, B, C, D
-              const isSelected = userAnswer === optionValue;
-              return (
-                <TouchableOpacity
-                  key={optionKey}
-                  style={[
-                    styles.optionCard,
-                    { 
-                      backgroundColor: isSelected ? colors.primary + '10' : colors.cardBackground,
-                      borderColor: isSelected ? colors.primary : colors.border
-                    }
-                  ]}
-                  onPress={() => handleAnswerSelect(currentSubjectQuestion.question_id, optionValue)}
-                >
-                  <Text style={[
-                    styles.optionLabel,
-                    { color: isSelected ? colors.primary : colors.text }
-                  ]}>
-                    {optionLabel}.
-                  </Text>
-                  <Text style={[
-                    styles.optionText,
-                    { color: isSelected ? colors.primary : colors.text }
-                  ]}>
-                    {optionValue}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </ScrollView>
-        {/* Navigation Footer */}
-        <View style={[styles.testFooter, { backgroundColor: colors.cardBackground, borderTopColor: colors.border, justifyContent: 'space-between' }]}> 
-          <TouchableOpacity
-            style={[styles.navButton, currentQuestionIndex === 0 && { opacity: 0.5 }]}
-            onPress={handlePreviousQuestion}
-            disabled={currentQuestionIndex === 0}
-          >
-            <ChevronLeft size={20} color={colors.text} />
-            <Text style={[styles.navButtonText, { color: colors.text }]}>Previous</Text>
-          </TouchableOpacity>
+        
+        {/* Use TestQuestionDetail Component */}
+        <TestQuestionDetail
+          question={currentSubjectQuestion}
+          questionNumber={currentQuestionIndex + 1}
+          totalQuestions={subjectQuestions.length}
+          onBack={() => setCurrentStep('configure')}
+          onNext={currentQuestionIndex < subjectQuestions.length - 1 ? handleNextQuestion : undefined}
+          onPrevious={currentQuestionIndex > 0 ? handlePreviousQuestion : undefined}
+          onQuestionAnswered={(questionId, selectedOption, isCorrect) => {
+            // Handle question answered callback if needed
+          }}
+          selectedAnswer={userAnswer}
+          onAnswerSelect={handleAnswerSelect}
+          isBookmarked={bookmarkedQuestions[currentSubjectQuestion.question_id] || false}
+          onToggleBookmark={toggleBookmark}
+          subjectId={currentSubjectId}
+          chapterId={currentChapterId}
+        />
+        
+        {/* Submit Test Button */}
+        <View style={[styles.testFooter, { backgroundColor: colors.cardBackground, borderTopColor: colors.border, justifyContent: 'center' }]}> 
           <TouchableOpacity
             style={[styles.submitButton, { backgroundColor: colors.success, marginHorizontal: 8 }]}
             onPress={handleSubmitTest}
           >
             <Text style={styles.submitButtonText}>Submit Test</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.navButton, currentQuestionIndex === subjectQuestions.length - 1 && { opacity: 0.5 }]}
-            onPress={handleNextQuestion}
-            disabled={currentQuestionIndex === subjectQuestions.length - 1}
-          >
-            <Text style={[styles.navButtonText, { color: colors.text }]}>Next</Text>
-            <ChevronRight size={20} color={colors.text} />
-          </TouchableOpacity>
         </View>
+        
         {/* Status Modal */}
         <QuestionStatusModal
           visible={showStatusModal}
@@ -1344,7 +1367,7 @@ export default function CreateTestScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}> 
+    <SafeAreaView style={{ flex: 1 }}>
       {!showTestCreation ? (
         loadingReport ? (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -1433,7 +1456,7 @@ export default function CreateTestScreen() {
           </ScrollView>
         )
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 

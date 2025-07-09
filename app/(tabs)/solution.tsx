@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, ActivityIndicator, ScrollView, TouchableOpacity, Platform, Modal } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import axios from 'axios';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import MathRendererSolution from '@/components/common/MathRendererSolution';
+import { X, Maximize2 } from 'lucide-react-native';
 let MathView: any = null;
 console.log("web===>",Platform.OS);
 if (Platform.OS !== 'web') {
@@ -43,6 +46,84 @@ function getUserSelectedOption(q: any, solutionData: any) {
   return null;
 }
 
+// Utility to sanitize LaTeX for better native rendering
+function sanitizeLatex(content: string) {
+  if (!content) return '';
+  return content
+    // Replace newlines with spaces in LaTeX arrays
+    .replace(/\\begin{array}{([^}]*)}/g, '\\begin{array}{$1} ')
+    .replace(/\\end{array}/g, ' \\end{array}')
+    // Ensure proper spacing around LaTeX environments
+    .replace(/\\begin{([^}]*)}/g, ' \\begin{$1} ')
+    .replace(/\\end{([^}]*)}/g, ' \\end{$1} ')
+    // Fix common LaTeX spacing issues
+    .replace(/\\\\/g, ' \\\\ ')
+    .replace(/&/g, ' & ')
+    // Normalize spaces
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Utility to clean LaTeX strings
+function cleanLatex(str: string) {
+  if (!str) return '';
+  // Remove all $ symbols and trim whitespace
+  const cleaned = str.replace(/\$/g, '').trim();
+  // Apply additional sanitization for better rendering
+  return sanitizeLatex(cleaned);
+}
+
+// Utility to render mixed question content (plain text + LaTeX)
+function renderQuestionContent(question: string) {
+  if (!question) return null;
+  question = question.replace(/\n/g, ' ');
+  // Split by LaTeX delimiters
+  const parts = question.split(/(\$[^$]*\$|\\\[[^\\]*\\\]|\\\([^\\]*\\\))/g);
+  return parts.map((part, idx) => {
+    if (part.startsWith('$') && part.endsWith('$')) {
+      // Dollar math
+      return (
+        <MathView
+          key={idx}
+          math={part}
+          style={{ fontSize: 16, color: '#0f172a' }}
+        />
+      );
+    } else if (part.startsWith('\\[') && part.endsWith('\\]')) {
+      // Display math
+      return (
+        <MathView
+          key={idx}
+          math={part}
+          style={{ fontSize: 16, color: '#0f172a', minHeight: 40 }}
+        />
+      );
+    } else if (part.startsWith('\\(') && part.endsWith('\\)')) {
+      // Inline math
+      return (
+        <MathView
+          key={idx}
+          math={part}
+          style={{ fontSize: 16, color: '#0f172a' }}
+        />
+      );
+    } else {
+      // Plain text part
+      return (
+        <Text key={idx} style={{ 
+          flexWrap: 'wrap', 
+          color: '#0f172a', 
+          fontSize: 16, 
+          lineHeight: 24,
+          marginBottom: 2
+        }}>
+          {part}
+        </Text>
+      );
+    }
+  });
+}
+
 export default function SolutionScreen() {
   const { test_id } = useLocalSearchParams();
   const [loading, setLoading] = useState(true);
@@ -51,6 +132,8 @@ export default function SolutionScreen() {
   const [selectedSubject, setSelectedSubject] = useState('Physics');
   const [selectedFilter, setSelectedFilter] = useState('All');
   const [expanded, setExpanded] = useState<{ [key: string]: boolean }>({});
+  const [showSolutionModal, setShowSolutionModal] = useState<string | null>(null);
+  const [showQuestionModal, setShowQuestionModal] = useState<string | null>(null);
 
   useEffect(() => {
     if (!test_id) return;
@@ -122,7 +205,7 @@ export default function SolutionScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#f8fafc' }}>
+    <SafeAreaView style={{ flex: 1 }}>
       {/* Tabs */}
       <View style={{ flexDirection: 'row', marginTop: 16, marginBottom: 8, justifyContent: 'center' }}>
         {SUBJECTS.map(subject => (
@@ -188,17 +271,29 @@ export default function SolutionScreen() {
               }}
             >
               <TouchableOpacity
-                style={{ flexDirection: 'row', alignItems: 'center', padding: 16 }}
+                style={{ flexDirection: 'row',  padding: 16 }}
                 onPress={() => setExpanded(prev => ({ ...prev, [q.question_id]: !isExpanded }))}
                 activeOpacity={0.8}
               >
                 <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: getStatusColor(status), alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
                   <Text style={{ color: '#fff', fontWeight: 'bold' }}>{idx + 1}</Text>
                 </View>
-                <Text style={{ flex: 1, color: '#0f172a', fontSize: 16 }}>
-                  {q.question ? q.question.replace(/\n/g, ' ').slice(0, 120) : ''}
-                  {q.question && q.question.length > 120 ? '...' : ''}
-                </Text>
+                {/* Render question text with mixed renderer for LaTeX and plain text */}
+                <View style={{ flex: 1, marginRight: 8, flexDirection: 'row', alignItems: 'center' }}>
+                  {Platform.OS === 'web' ? (
+                    <span style={{ color: '#0f172a', fontSize: 16 }}>{q.question}</span>
+                  ) : (
+                    <MathRendererSolution 
+                      content={q.question} 
+                      color="#0f172a" 
+                      fontSize={15} 
+                      minHeight={q.question && q.question.length > 130 ? 180 : 80} 
+                    />
+                  )}
+                  <TouchableOpacity onPress={() => setShowQuestionModal(q.question_id)} style={{ marginLeft: 8 }}>
+                    <Maximize2 size={20} color="#2563eb" />
+                  </TouchableOpacity>
+                </View>
                 <Text style={{ color: getStatusColor(status), fontWeight: 'bold', marginLeft: 8, fontSize: 18 }}>{isExpanded ? '-' : '+'}</Text>
               </TouchableOpacity>
               {isExpanded && (
@@ -243,11 +338,11 @@ export default function SolutionScreen() {
                           paddingHorizontal: 2,
                         }}
                       >
-                        <Text style={{ fontWeight: 'bold', color: color, marginRight: 8 }}>{optionLetter}.</Text>
+                        <Text style={{ fontWeight: 'bold', color: color, marginRight: 8, marginBottom: 15, fontSize: 20 }}>{optionLetter}.</Text>
                         {Platform.OS === 'web' ? (
-                          <span style={{ color, flex: 1 }}>{optionValue}</span>
+                          <span style={{ color, flex: 1 }}>{cleanLatex(optionValue)}</span>
                         ) : (
-                          <MathView math={optionValue} color={color} style={{ flex: 1 }} />
+                          <MathRendererSolution content={optionValue} color={color} fontSize={20} minHeight={40} />
                         )}
                         {icon}
                       </View>
@@ -256,16 +351,81 @@ export default function SolutionScreen() {
                   {/* Solution */}
                   {q.solution && (
                     <View style={{ marginTop: 12, backgroundColor: '#f1f5f9', borderRadius: 8, padding: 12 }}>
-                      <Text style={{ color: '#2563eb', fontWeight: 'bold', marginBottom: 4 }}>Solution:</Text>
-                      {Platform.OS === 'web' ? (
-                        <span style={{ color: '#334155', flex: 1 }}>{q.solution || ''}</span>
-                      ) : (
-                        <MathView math={q.solution || ''} color="#334155" style={{ flex: 1 }} />
-                      )}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                        <Text style={{ color: '#2563eb', fontWeight: 'bold', fontSize: 18 }}>Solution:</Text>
+                        <TouchableOpacity onPress={() => setShowSolutionModal(q.question_id)} style={{ marginLeft: 8 }}>
+                          <Maximize2 size={20} color="#2563eb" />
+                        </TouchableOpacity>
+                      </View>
+                      <MathRendererSolution content={q.solution || ''} fontSize={15} minHeight={120} />
+                      {/* Modal for full solution */}
+                      <Modal
+                        visible={showSolutionModal === q.question_id}
+                        animationType="slide"
+                        transparent={true}
+                        onRequestClose={() => setShowSolutionModal(null)}
+                      >
+                        <View style={{
+                          flex: 1,
+                          backgroundColor: 'rgba(0,0,0,0.5)',
+                          justifyContent: 'center',
+                          alignItems: 'center'
+                        }}>
+                          <View style={{
+                            backgroundColor: '#fff',
+                            borderRadius: 16,
+                            padding: 16,
+                            width: '90%',
+                            maxHeight: '80%',
+                          }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                              <Text style={{ color: '#2563eb', fontWeight: 'bold', fontSize: 16 }}>Full Solution</Text>
+                              <TouchableOpacity onPress={() => setShowSolutionModal(null)}>
+                                <X size={24} color="#2563eb" />
+                              </TouchableOpacity>
+                            </View>
+                            <ScrollView style={{ maxHeight: 500, minHeight: 300 }}>
+                              <MathRendererSolution content={q.solution || ''} fontSize={16} minHeight={300} maxHeight={600} />
+                            </ScrollView>
+                          </View>
+                        </View>
+                      </Modal>
                     </View>
                   )}
                 </View>
               )}
+              {/* Question Modal */}
+              <Modal
+                visible={showQuestionModal === q.question_id}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setShowQuestionModal(null)}
+              >
+                <View style={{
+                  flex: 1,
+                  backgroundColor: 'rgba(0,0,0,0.5)',
+                  justifyContent: 'center',
+                  alignItems: 'center'
+                }}>
+                  <View style={{
+                    backgroundColor: '#fff',
+                    borderRadius: 16,
+                    padding: 16,
+                    width: '90%',
+                    maxHeight: '80%',
+                  }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <Text style={{ color: '#2563eb', fontWeight: 'bold', fontSize: 16 }}>Full Question</Text>
+                      <TouchableOpacity onPress={() => setShowQuestionModal(null)}>
+                        <X size={24} color="#2563eb" />
+                      </TouchableOpacity>
+                    </View>
+                    <ScrollView style={{ maxHeight: 500, minHeight: 300 }}>
+                      <MathRendererSolution content={q.question || ''} fontSize={16} minHeight={300} maxHeight={600} />
+                    </ScrollView>
+                  </View>
+                </View>
+              </Modal>
             </View>
           );
         })}
@@ -273,6 +433,6 @@ export default function SolutionScreen() {
           <Text style={{ textAlign: 'center', color: '#64748b', marginTop: 32 }}>No questions found for this filter.</Text>
         )}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 } 

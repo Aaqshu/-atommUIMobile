@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { LogOut, User, Settings, HelpCircle, Info } from 'lucide-react-native';
 import ProfileOption from '@/components/profile/ProfileOption';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
@@ -12,74 +13,76 @@ export default function ProfileScreen() {
   const isGuest = user?.role === 'guest';
 
   return (
-    <ScrollView 
-      style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={styles.contentContainer}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={[styles.profileHeader, { backgroundColor: colors.cardBackground }]}>
-        <View style={[styles.avatarContainer, { borderColor: colors.border }]}>
-          {isGuest ? (
-            <User size={40} color={colors.primary} />
-          ) : (
-            <Image 
-              source={{ uri: 'https://ui-avatars.com/api/?name=' + (user?.username || 'User') }} 
-              style={styles.avatar} 
-            />
-          )}
-        </View>
-        <View style={styles.profileInfo}>
-          <Text style={[styles.username, { color: colors.text }]}>
-            {user?.username || 'User'}
-          </Text>
-          <Text style={[styles.userType, { color: colors.textSecondary }]}>
-            {isGuest ? 'Guest User' : 'Google User'}
-          </Text>
-        </View>
-      </View>
-      
-      {/* <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Account</Text>
-        <View style={[styles.optionsContainer, { backgroundColor: colors.cardBackground }]}>
-          <ProfileOption 
-            icon={<User size={20} color={colors.primary} />}
-            title="Edit Profile"
-            subtitle="Change your profile information"
-            disabled={isGuest}
-          />
-          <ProfileOption 
-            icon={<Settings size={20} color={colors.primary} />}
-            title="Settings"
-            subtitle="App preferences and notifications"
-          />
-        </View>
-      </View>
-      
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Support</Text>
-        <View style={[styles.optionsContainer, { backgroundColor: colors.cardBackground }]}>
-          <ProfileOption 
-            icon={<HelpCircle size={20} color={colors.primary} />}
-            title="Help Center"
-            subtitle="Get help with your account"
-          />
-          <ProfileOption 
-            icon={<Info size={20} color={colors.primary} />}
-            title="About"
-            subtitle="App information and version"
-          />
-        </View>
-      </View> */}
-      
-      <TouchableOpacity 
-        style={[styles.logoutButton, { backgroundColor: colors.danger }]}
-        onPress={logout}
-        activeOpacity={0.8}
+    <SafeAreaView style={{ flex: 1 }}>
+      <ScrollView 
+        style={[styles.container, { backgroundColor: colors.background }]}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
       >
-        <LogOut size={20} color="#ffffff" style={styles.logoutIcon} />
-        <Text style={styles.logoutText}>Log Out</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        <View style={[styles.profileHeader, { backgroundColor: colors.cardBackground }]}>
+          <View style={[styles.avatarContainer, { borderColor: colors.border }]}>
+            {isGuest ? (
+              <User size={40} color={colors.primary} />
+            ) : (
+              <Image 
+                source={{ uri: 'https://ui-avatars.com/api/?name=' + (user?.username || 'User') }} 
+                style={styles.avatar} 
+              />
+            )}
+          </View>
+          <View style={styles.profileInfo}>
+            <Text style={[styles.username, { color: colors.text }]}>
+              {user?.username || 'User'}
+            </Text>
+            <Text style={[styles.userType, { color: colors.textSecondary }]}>
+              {isGuest ? 'Guest User' : 'Google User'}
+            </Text>
+          </View>
+        </View>
+        
+        {/* <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Account</Text>
+          <View style={[styles.optionsContainer, { backgroundColor: colors.cardBackground }]}>
+            <ProfileOption 
+              icon={<User size={20} color={colors.primary} />}
+              title="Edit Profile"
+              subtitle="Change your profile information"
+              disabled={isGuest}
+            />
+            <ProfileOption 
+              icon={<Settings size={20} color={colors.primary} />}
+              title="Settings"
+              subtitle="App preferences and notifications"
+            />
+          </View>
+        </View>
+        
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Support</Text>
+          <View style={[styles.optionsContainer, { backgroundColor: colors.cardBackground }]}>
+            <ProfileOption 
+              icon={<HelpCircle size={20} color={colors.primary} />}
+              title="Help Center"
+              subtitle="Get help with your account"
+            />
+            <ProfileOption 
+              icon={<Info size={20} color={colors.primary} />}
+              title="About"
+              subtitle="App information and version"
+            />
+          </View>
+        </View> */}
+        
+        <TouchableOpacity 
+          style={[styles.logoutButton, { backgroundColor: colors.danger }]}
+          onPress={logout}
+          activeOpacity={0.8}
+        >
+          <LogOut size={20} color="#ffffff" style={styles.logoutIcon} />
+          <Text style={styles.logoutText}>Log Out</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 

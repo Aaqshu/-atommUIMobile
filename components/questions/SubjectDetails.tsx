@@ -96,6 +96,7 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
   // Subtopic filter state for PYQ
   const [subtopics, setSubtopics] = useState<{ number: number; name: string }[]>([]);
   const [selectedSubtopic, setSelectedSubtopic] = useState<'all' | number>('all');
+  const [visibleCount, setVisibleCount] = useState(10);
 
   const stats = {
     all: questions.length,
@@ -808,7 +809,7 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
 
   const renderQuestions = () => (
     <View style={styles.questionsContainer}>
-      {locallyFilteredQuestions.map((question, index) => (
+      {locallyFilteredQuestions.slice(0, visibleCount).map((question, index) => (
         <Animated.View
           key={question.question_id}
           entering={FadeIn.duration(300).delay(index * 100)}
@@ -838,7 +839,7 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
                 </Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'transparent' }}>
                   {getStatusIcon(question.question_id)}
-                  <Text style={{ fontWeight: '600', color: '#22c55e', marginLeft: 4, fontSize: 16 }}>
+                  <Text style={{ fontWeight: '600', color: getStatusColor(question.question_id), marginLeft: 4, fontSize: 16 }}>
                     {getStatusText(question.question_id)}
                   </Text>
                 </View>
@@ -853,13 +854,11 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
             </View>
 
             <View style={{ marginBottom: 12 }}>
-              <RichContentRenderer
-                content={question.question || ''}
-                subjectId={subjectId}
-                chapterId={selectedChapter?.chapter_id || ''}
-                color={colors.text}
-              />
+              <MathRenderer content={question.question || ''} color={colors.text} subjectId={subjectId} chapterId={selectedChapter?.chapter_id || ''} />
             </View>
+
+            {/* Add extra spacing between question and exam info */}
+            <View style={{ height: 15 }} />
 
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <View style={{
@@ -871,7 +870,7 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
                 justifyContent: 'center',
                 minHeight: 32,
               }}>
-                <Text style={{ color: '#2563eb', fontWeight: '700', fontSize: 16, textAlign: 'center' }}>
+                <Text style={{ color: '#2563eb', fontWeight: '700', fontSize: 14, textAlign: 'center' }}>
                   {question.exam_type}{question.exam_year ? `-${question.exam_year}` : ''}
                 </Text>
               </View>
@@ -879,6 +878,14 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
           </TouchableOpacity>
         </Animated.View>
       ))}
+      {visibleCount < locallyFilteredQuestions.length && (
+        <TouchableOpacity
+          style={{ marginVertical: 16, alignItems: 'center' }}
+          onPress={() => setVisibleCount(visibleCount + 10)}
+        >
+          <Text style={{ color: colors.primary, fontSize: 16, fontWeight: 'bold' }}>Load More</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 
@@ -1010,7 +1017,7 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
           <select
             value={selectedSubtopic}
             onChange={e => setSelectedSubtopic(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-            style={{ padding: 8, borderRadius: 8, borderColor: '#cbd5e1', minWidth: 200 }}
+            style={{ padding: 2, borderRadius: 8, borderColor: '#cbd5e1', minWidth: 200 }}
           >
             <option value="all">All Subtopics</option>
             {subtopics.map(st => (
@@ -1024,27 +1031,42 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
       const Picker = require('@react-native-picker/picker').Picker;
       return (
         <View style={{ marginBottom: 16 }}>
-          <Picker
-            selectedValue={selectedSubtopic}
-            onValueChange={(v: any) => setSelectedSubtopic(v)}
-            style={{ height: 44, borderRadius: 8 }}
-          >
-            <Picker.Item label="All Subtopics" value="all" />
-            {subtopics.map(st => (
-              <Picker.Item key={st.number} label={st.name} value={st.number} />
-            ))}
-          </Picker>
+          <Text style={{ color: '#1e293b', fontWeight: 'bold', marginBottom: 6 }}>Subtopic:</Text>
+          <View style={{
+            borderWidth: 1,
+            borderColor: '#cbd5e1',
+            borderRadius: 8,
+            backgroundColor: '#fff',
+            overflow: 'hidden'
+          }}>
+            <Picker
+              selectedValue={selectedSubtopic}
+              onValueChange={v => setSelectedSubtopic(v)}
+              style={{ height: 44, borderRadius: 8 }}
+            >
+              <Picker.Item label="All Subtopics" value="all" />
+              {subtopics.map(st => (
+                <Picker.Item key={st.number} label={st.name} value={st.number} />
+              ))}
+            </Picker>
+          </View>
         </View>
       );
     }
   };
+
+  useEffect(() => {
+    setVisibleCount(10);
+  }, [selectedChapter, selectedExamType, selectedYearRange, selectedStatusFilter, selectedLocalExamType, selectedLocalExamYear, selectedSubtopic]);
 
   if (selectedQuestion) {
     return (
       <QuestionDetail
         question={{
           ...selectedQuestion,
-          status: questionStates[selectedQuestion.question_id] || 'new'
+          status: questionStates[selectedQuestion.question_id] || 'new',
+          subjectId: subjectId,
+          chapterId: selectedChapter?.chapter_id || '',
         }}
         questionNumber={currentQuestionIndex + 1}
         totalQuestions={questions.length}
@@ -1053,8 +1075,6 @@ export default function SubjectDetails({ subject, subjectId, onBack, type, token
         onPrevious={currentQuestionIndex > 0 ? handlePreviousQuestion : undefined}
         onQuestionAnswered={handleQuestionAnswered}
         type={type}
-        subjectId={subjectId}
-        chapterId={selectedChapter?.chapter_id || ''}
       />
     );
   }

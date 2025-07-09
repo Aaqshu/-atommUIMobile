@@ -19,7 +19,7 @@ export default function TabLayout() {
           backgroundColor: colors.cardBackground,
           borderTopWidth: 1,
           borderTopColor: colors.border,
-          height: 50,
+          // height: 50,
         },
         headerStyle: {
           backgroundColor: colors.background,

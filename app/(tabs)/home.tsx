@@ -7,6 +7,7 @@ import { CalendarClock, Brain, Trophy, Target } from 'lucide-react-native';
 import WelcomeCard from '@/components/home/WelcomeCard';
 import axios from 'axios';
 import { useFocusEffect } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 type DashboardStats = {
   today: number;
@@ -65,63 +66,65 @@ export default function HomeScreen() {
   );
 
   return (
-    <ScrollView 
-      style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={styles.contentContainer}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={colors.primary}
-        />
-      }
-    >
-      <WelcomeCard username={user?.username || 'User'} />
-      
-      {error && (
-        <View style={[styles.errorContainer, { backgroundColor: colors.danger + '20' }]}>
-          <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
-        </View>
-      )}
-      
-      <Text style={[styles.sectionTitle, { color: colors.text, fontFamily: 'Inter-Bold' }]}>
-        Your Progress
-      </Text>
-      
-      <View style={styles.statsContainer}>
-        <StatsCard 
-          title="Today" 
-          value={stats.today.toString()} 
-          icon={<CalendarClock size={24} color={colors.primary} />} 
-        />
-        <StatsCard 
-          title="This Week" 
-          value={stats.thisWeek.toString()} 
-          icon={<Brain size={24} color="#8B5CF6" />} 
-        />
-        <StatsCard 
-          title="Last Week" 
-          value={stats.lastWeek.toString()} 
-          icon={<Trophy size={24} color="#F59E0B" />} 
-        />
-        <StatsCard 
-          title="Total" 
-          value={stats.goals.toString()} 
-          icon={<Target size={24} color="#10B981" />} 
-        />
-      </View>
-      
-      <Text style={[styles.sectionTitle, { color: colors.text, fontFamily: 'Inter-Bold', marginTop: 24 }]}>
-        Recommended Courses
-      </Text>
-      
-      <View style={[styles.emptyState, { borderColor: colors.border }]}>
-        <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
-          No courses available yet. Check back soon!
+    <SafeAreaView style={{ flex: 1 }}>
+      <ScrollView 
+        style={[styles.container, { backgroundColor: colors.background }]}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
+        }
+      >
+        <WelcomeCard username={user?.username || 'User'} />
+        
+        {error && (
+          <View style={[styles.errorContainer, { backgroundColor: colors.danger + '20' }]}>
+            <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
+          </View>
+        )}
+        
+        <Text style={[styles.sectionTitle, { color: colors.text, fontFamily: 'Inter-Bold' }]}>
+          Your Progress
         </Text>
-      </View>
-    </ScrollView>
+        
+        <View style={styles.statsContainer}>
+          <StatsCard 
+            title="Today" 
+            value={stats.today.toString()} 
+            icon={<CalendarClock size={24} color={colors.primary} />} 
+          />
+          <StatsCard 
+            title="This Week" 
+            value={stats.thisWeek.toString()} 
+            icon={<Brain size={24} color="#8B5CF6" />} 
+          />
+          <StatsCard 
+            title="Last Week" 
+            value={stats.lastWeek.toString()} 
+            icon={<Trophy size={24} color="#F59E0B" />} 
+          />
+          <StatsCard 
+            title="Total" 
+            value={stats.goals.toString()} 
+            icon={<Target size={24} color="#10B981" />} 
+          />
+        </View>
+        
+        <Text style={[styles.sectionTitle, { color: colors.text, fontFamily: 'Inter-Bold', marginTop: 24 }]}>
+          Recommended Courses
+        </Text>
+        
+        <View style={[styles.emptyState, { borderColor: colors.border }]}>
+          <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
+            No courses available yet. Check back soon!
+          </Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 

@@ -1,17 +1,72 @@
 import React from 'react';
-import { Platform, Text, StyleSheet } from 'react-native';
+import { Platform, Text, StyleSheet, Image, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
 type MathRendererProps = {
   content: string;
   color?: string;
+  subjectId?: string;
+  chapterId?: string;
+  skipImageParse?: boolean;
 };
 
 function hasMathDelimiters(str: string) {
   return /\$[^$]+\$|\$\$[\s\S]+\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)/.test(str);
 }
 
-export default function MathRenderer({ content, color = '#000' }: MathRendererProps) {
+// Helper to split into image and non-image segments
+function splitIntoImageAndOtherSegments(text: string, subjectId?: string, chapterId?: string) {
+  if (!text || !subjectId || !chapterId) return [{ type: 'other', content: text }];
+  const BASE_URL = 'https://res.cloudinary.com/dbnprdefl/image/upload';
+  const folder = `${subjectId.toLowerCase()}_${chapterId.toLowerCase()}`;
+  const combinedRegex = /\\begin\{center\}\\includegraphics(?:\[.*?\])?\{(.*?)\}\\end\{center\}|\\includegraphics(?:\[.*?\])?\{(.*?)\}/g;
+  let segments: { type: 'image' | 'other'; content: string }[] = [];
+  let lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = combinedRegex.exec(text)) !== null) {
+    // Text before image
+    if (m.index > lastIndex) {
+      segments.push({ type: 'other', content: text.slice(lastIndex, m.index) });
+    }
+    // Image segment
+    const imageNameRaw = m[1] || m[2] || '';
+    let name = imageNameRaw.trim();
+    if (!name.toLowerCase().endsWith('.jpg')) name += '.jpg';
+    name = name.replace(/[^a-zA-Z0-9_.()\-]/g, '');
+    const url = `${BASE_URL}/${folder}/${name}`;
+    segments.push({ type: 'image', content: url });
+    lastIndex = m.index + m[0].length;
+  }
+  // Remaining text
+  if (lastIndex < text.length) {
+    segments.push({ type: 'other', content: text.slice(lastIndex) });
+  }
+  return segments;
+}
+
+function MathRenderer({ content, color = '#000', subjectId, chapterId, skipImageParse }: MathRendererProps) {
+  // Only split for images if not skipping (prevents infinite recursion)
+console.log("content",content)
+  if (!skipImageParse) {
+    const segments = splitIntoImageAndOtherSegments(content, subjectId, chapterId);
+    if (segments.length > 1 || (segments.length === 1 && segments[0].type === 'image')) {
+      return (
+        <View>
+          {segments.map((seg, idx) =>
+            seg.type === 'image'
+              ? (
+                  <React.Fragment key={`imgfrag-${idx}`}>
+                    <Image source={{ uri: seg.content }} style={{ width: '100%', height: 220, marginVertical: 12, borderRadius: 12 }} resizeMode="contain" />
+                    <View style={{ minHeight: 1, marginBottom: 16 }} />
+                  </React.Fragment>
+                )
+              : <MathRenderer key={`math-${idx}`} content={seg.content} color={color} subjectId={subjectId} chapterId={chapterId} skipImageParse={true} />
+          )}
+        </View>
+      );
+    }
+  }
+
   let mathContent = content || '';
   if (!hasMathDelimiters(mathContent)) {
     mathContent = `\\[${mathContent}\\]`;
@@ -46,8 +101,8 @@ export default function MathRenderer({ content, color = '#000' }: MathRendererPr
             margin: 0;
             padding: 8px;
             color: ${color};
-            font-size: 16px;
-            line-height: 1.5;
+            font-size: 15px;
+            line-height: 1.1;
             font-family: 'Inter-Regular', -apple-system, BlinkMacSystemFont, sans-serif;
           }
           .math-content {
@@ -87,13 +142,30 @@ export default function MathRenderer({ content, color = '#000' }: MathRendererPr
 
 const styles = StyleSheet.create({
   mathText: {
-    fontSize: 16,
+    fontSize: 18,
     lineHeight: 24,
     fontFamily: 'Inter-Regular',
   },
   webView: {
     minHeight: 40,
+    maxHeight: 250,
+    overflow: 'scroll',
+    height: 60,
     flexShrink: 1,
     backgroundColor: 'transparent',
   },
 });
+
+function areEqual(prevProps: MathRendererProps, nextProps: MathRendererProps) {
+  return (
+    prevProps.content === nextProps.content &&
+    prevProps.color === nextProps.color &&
+    prevProps.subjectId === nextProps.subjectId &&
+    prevProps.chapterId === nextProps.chapterId &&
+    prevProps.skipImageParse === nextProps.skipImageParse
+  );
+}
+
+const MemoizedMathRenderer = React.memo(MathRenderer, areEqual);
+
+export default MemoizedMathRenderer;

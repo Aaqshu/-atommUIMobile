@@ -6,6 +6,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { Book, Clock, Beaker, Leaf, Fish } from 'lucide-react-native';
 import SubjectDetails from '@/components/questions/SubjectDetails';
 import axios from 'axios';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 type Subject = {
   name: string;
@@ -209,111 +210,113 @@ export default function QuestionsScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={styles.classContainer}>
-        <TouchableOpacity
-          style={[
-            styles.classTab,
-            activeClass === '11' && { backgroundColor: colors.primary },
-          ]}
-          onPress={() => setActiveClass('11')}
-        >
-          <Text
+    <SafeAreaView style={{ flex: 1 }}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.classContainer}>
+          <TouchableOpacity
             style={[
-              styles.classText,
-              { color: activeClass === '11' ? '#fff' : colors.text },
+              styles.classTab,
+              activeClass === '11' && { backgroundColor: colors.primary },
             ]}
+            onPress={() => setActiveClass('11')}
           >
-            Class 11
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.classTab,
-            activeClass === '12' && { backgroundColor: colors.primary },
-          ]}
-          onPress={() => setActiveClass('12')}
-        >
-          <Text
+            <Text
+              style={[
+                styles.classText,
+                { color: activeClass === '11' ? '#fff' : colors.text },
+              ]}
+            >
+              Class 11
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[
-              styles.classText,
-              { color: activeClass === '12' ? '#fff' : colors.text },
+              styles.classTab,
+              activeClass === '12' && { backgroundColor: colors.primary },
             ]}
+            onPress={() => setActiveClass('12')}
           >
-            Class 12
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            activeTab === 'most-wanted' && { backgroundColor: colors.primary },
-          ]}
-          onPress={() => setActiveTab('most-wanted')}
-        >
-          <Text
-            style={[
-              styles.tabText,
-              { color: activeTab === 'most-wanted' ? '#fff' : colors.text },
-            ]}
-          >
-            Most Wanted 2025
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            activeTab === 'previous-year' && { backgroundColor: colors.primary },
-          ]}
-          onPress={() => setActiveTab('previous-year')}
-        >
-          <Text
-            style={[
-              styles.tabText,
-              { color: activeTab === 'previous-year' ? '#fff' : colors.text },
-            ]}
-          >
-            Previous Year
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <Book size={24} color={colors.primary} />
-          <Text style={[styles.headerText, { color: colors.text }]}>
-            {activeTab === 'most-wanted' ? 'Most Wanted Questions 2025' : 'Previous Year Questions'}
-          </Text>
+            <Text
+              style={[
+                styles.classText,
+                { color: activeClass === '12' ? '#fff' : colors.text },
+              ]}
+            >
+              Class 12
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-              Loading questions...
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[
+              styles.tab,
+              activeTab === 'most-wanted' && { backgroundColor: colors.primary },
+            ]}
+            onPress={() => setActiveTab('most-wanted')}
+          >
+            <Text
+              style={[
+                styles.tabText,
+                { color: activeTab === 'most-wanted' ? '#fff' : colors.text },
+              ]}
+            >
+              Most Wanted 2025
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.tab,
+              activeTab === 'previous-year' && { backgroundColor: colors.primary },
+            ]}
+            onPress={() => setActiveTab('previous-year')}
+          >
+            <Text
+              style={[
+                styles.tabText,
+                { color: activeTab === 'previous-year' ? '#fff' : colors.text },
+              ]}
+            >
+              Previous Year
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <Book size={24} color={colors.primary} />
+            <Text style={[styles.headerText, { color: colors.text }]}>
+              {activeTab === 'most-wanted' ? 'Most Wanted Questions 2025' : 'Previous Year Questions'}
             </Text>
           </View>
-        ) : error ? (
-          <View style={[styles.errorContainer, { backgroundColor: colors.danger + '20' }]}>
-            <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
-            <TouchableOpacity
-              style={[styles.retryButton, { backgroundColor: colors.danger }]}
-              onPress={fetchStats}
-            >
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          getSubjects().map(renderSubject)
-        )}
-      </ScrollView>
-    </View>
+
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+                Loading questions...
+              </Text>
+            </View>
+          ) : error ? (
+            <View style={[styles.errorContainer, { backgroundColor: colors.danger + '20' }]}>
+              <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
+              <TouchableOpacity
+                style={[styles.retryButton, { backgroundColor: colors.danger }]}
+                onPress={fetchStats}
+              >
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            getSubjects().map(renderSubject)
+          )}
+        </ScrollView>
+      </View>
+    </SafeAreaView>
   );
 }
 

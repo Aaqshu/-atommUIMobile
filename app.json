@@ -32,7 +32,8 @@
       "router": {},
       "eas": {
         "projectId": "65507800-c71a-4d81-bd03-ed5b23f143cc"
-      }
+      },
+      "scheme":"Atomm-mobile-app"
     }
   }
 }
